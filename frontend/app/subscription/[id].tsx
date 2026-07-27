@@ -7,7 +7,12 @@ import { useLocalSearchParams, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { theme, CATEGORIES } from '@/src/theme';
 import { useAuth } from '@/src/auth-context';
-import { api, Subscription } from '@/src/api';
+import {
+  createSubscription,
+  deleteSubscription,
+  toggleSubscription,
+  updateSubscription,
+} from '@/src/api';
 import { GradientButton, Chip } from '@/src/ui';
 import { CURRENCIES, symbolFor } from '@/src/currency';
 import { format } from 'date-fns';
@@ -48,15 +53,17 @@ export default function SubscriptionForm() {
         name: name.trim(), amount: num, billing_cycle: cycle, category,
         currency,
         next_renewal: date, domain: domain.trim() || null, notes: notes.trim() || null,
-        status: existing?.status || 'active',
+        brand_color: existing?.brand_color ?? null,
+        status: existing?.status || ('active' as const),
         reminder_days_before: reminderDays,
+        snoozed_until: existing?.snoozed_until ?? null,
       };
       if (isNew) {
-        await api<Subscription>('/subscriptions', { method: 'POST', body });
+        await createSubscription(body);
       } else {
-        await api<Subscription>(`/subscriptions/${id}`, { method: 'PUT', body });
+        await updateSubscription(id, body);
       }
-      await Promise.all([refreshSubs(), refreshReminders()]);
+      await refreshSubs();
       router.back();
     } catch (e: any) {
       setErr(e.message || 'Save failed');
@@ -82,8 +89,8 @@ export default function SubscriptionForm() {
           <View style={{ flexDirection: 'row', gap: 4 }}>
             <Pressable
               onPress={async () => {
-                await api(`/subscriptions/${existing.id}/toggle`, { method: 'POST' });
-                await Promise.all([refreshSubs(), refreshReminders()]);
+                await toggleSubscription(existing.id, existing.status);
+                await refreshSubs();
                 router.back();
               }}
               style={styles.iconBtn}
@@ -96,8 +103,8 @@ export default function SubscriptionForm() {
             </Pressable>
             <Pressable
               onPress={async () => {
-                await api(`/subscriptions/${existing.id}`, { method: 'DELETE' });
-                await Promise.all([refreshSubs(), refreshReminders()]);
+                await deleteSubscription(existing.id);
+                await refreshSubs();
                 router.back();
               }}
               style={styles.iconBtn}

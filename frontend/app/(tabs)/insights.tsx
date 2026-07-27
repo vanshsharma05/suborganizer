@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, RefreshControl } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -7,55 +7,93 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { theme, IMAGES, CATEGORY_COLORS } from '@/src/theme';
-import { useAuth } from '@/src/auth-context';
+import { useAuth, monthlyEquivalent } from '@/src/auth-context';
 import { formatMoney, formatMoneyRounded } from '@/src/ui';
-import { fmtMoney } from '@/src/currency';
-import { api } from '@/src/api';
-
-type Insight = {
-  primary_currency: string;
-  monthly_total: number;
-  yearly_projected: number;
-  top_category: string;
-  by_category?: Record<string, number>;
-  basic_summary: string;
-  pro_savings_tip: string;
-  pro_unused_alert: string;
-  is_pro: boolean;
-};
+import { convertToPrimary } from '@/src/currency';
+import { upgradeToPro } from '@/src/api';
 
 export default function InsightsScreen() {
   const insets = useSafeAreaInsets();
-  const { user, setPro, refreshUser } = useAuth();
-  const [data, setData] = useState<Insight | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { user, subs, refreshSubs, refreshUser, setPro } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
   const [upgrading, setUpgrading] = useState(false);
 
-  const fetchInsights = async () => {
+  const isPro = user?.is_pro ?? false;
+
+  // The old backend computed this in GET /insights. With the whole list already
+  // in context there is nothing to fetch — deriving it keeps the numbers in
+  // lockstep with the dashboard, which computes its totals the same way.
+  const data = useMemo(() => {
+    const primary = (user?.primary_currency || 'INR').toUpperCase();
+    const active = subs.filter((s) => s.status === 'active');
+
+    const by_category: Record<string, number> = {};
+    let monthly = 0;
+    let priciest: { name: string; monthly: number } | null = null;
+
+    for (const s of active) {
+      const v = convertToPrimary(monthlyEquivalent(s), s.currency, primary);
+      monthly += v;
+      by_category[s.category] = (by_category[s.category] || 0) + v;
+      if (!priciest || v > priciest.monthly) priciest = { name: s.name, monthly: v };
+    }
+
+    const ranked = Object.entries(by_category).sort(([, a], [, b]) => b - a);
+    const top_category = ranked[0]?.[0] ?? '—';
+    const money = (n: number) => formatMoneyRounded(n, primary);
+
+    const basic_summary = active.length === 0
+      ? 'No active subscriptions yet. Add one to see where your money actually goes.'
+      : `You're spending ${money(monthly)}/month across ${active.length} active `
+        + `${active.length === 1 ? 'subscription' : 'subscriptions'}. `
+        + `Your top category is ${top_category} (${money(by_category[top_category])}/mo).`;
+
+    // Deterministic, data-derived prompts. Genuinely useful, and honest — real
+    // LLM tips need a Supabase Edge Function to hold the API key server-side.
+    const savings_tip = priciest
+      ? `${priciest.name} is your largest line item at ${money(priciest.monthly)}/month — `
+        + `${money(priciest.monthly * 12)} a year. Worth checking if a cheaper tier covers you.`
+      : 'Add a few subscriptions and this will show you where to cut first.';
+
+    const paused = subs.filter((s) => s.status === 'paused').length;
+    const yearlyPlans = active.filter((s) => s.billing_cycle === 'yearly').length;
+    const unused_alert = paused > 0
+      ? `You have ${paused} paused ${paused === 1 ? 'subscription' : 'subscriptions'}. `
+        + 'If you have not missed them, cancel outright so they cannot silently resume.'
+      : yearlyPlans > 0
+        ? `${yearlyPlans} of your plans renew yearly — easy to forget. `
+          + 'Those charges are the ones that catch people out.'
+        : 'Nothing looks dormant right now. Check back after a few renewal cycles.';
+
+    return {
+      primary_currency: primary,
+      monthly_total: monthly,
+      yearly_projected: monthly * 12,
+      top_category,
+      by_category,
+      basic_summary,
+      pro_savings_tip: savings_tip,
+      pro_unused_alert: unused_alert,
+    };
+  }, [subs, user?.primary_currency]);
+
+  const onRefresh = async () => {
+    setRefreshing(true);
     try {
-      const r = await api<Insight>('/insights');
-      setData(r);
+      await refreshSubs();
     } finally {
-      setLoading(false);
       setRefreshing(false);
     }
   };
 
-  useEffect(() => { fetchInsights(); }, []);
-
-  const onRefresh = async () => { setRefreshing(true); await fetchInsights(); };
-
   const upgrade = async () => {
     setUpgrading(true);
     try {
-      await api('/auth/upgrade', { method: 'POST' });
+      await upgradeToPro();
       setPro(true);
-      await fetchInsights();
+      await refreshUser();
     } finally { setUpgrading(false); }
   };
-
-  const isPro = user?.is_pro || data?.is_pro;
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.color.surface }}>
@@ -69,9 +107,7 @@ export default function InsightsScreen() {
           <Text style={styles.title}>Understand your{'\n'}spending, effortlessly.</Text>
         </View>
 
-        {loading ? (
-          <ActivityIndicator style={{ marginTop: 60 }} color={theme.color.brand} />
-        ) : data ? (
+        {(
           <>
             {/* Hero AI card */}
             <Animated.View entering={FadeInDown.duration(500)} style={styles.aiCardWrap}>
@@ -191,7 +227,7 @@ export default function InsightsScreen() {
               </View>
             </View>
           </>
-        ) : null}
+        )}
       </ScrollView>
     </View>
   );
@@ -254,7 +290,7 @@ const styles = StyleSheet.create({
   upgradeBtn: {
     flexDirection: 'row', gap: 8, alignItems: 'center', justifyContent: 'center',
     paddingVertical: 14, paddingHorizontal: 24, borderRadius: theme.radius.pill,
-    shadowColor: '#1A1C1E', shadowOpacity: 0.2, shadowRadius: 14, shadowOffset: { width: 0, height: 8 },
+    shadowColor: '#1A1C1E', shadowOpacity: 0.2, shadowRadius: 14, shadowOffset: { width: 0, height: 8 }, elevation: 6,
   },
   upgradeBtnText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700', letterSpacing: 0.3 },
 });

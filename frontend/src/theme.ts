@@ -41,11 +41,14 @@ export const theme = {
   },
 };
 
+/**
+ * Bundled, not hotlinked. This background is behind both the login screen and
+ * the dashboard hero, so fetching it from a CDN meant the app's first
+ * impression depended on someone else's uptime and showed a blank panel to
+ * anyone opening it offline.
+ */
 export const IMAGES = {
-  heroMesh:
-    'https://images.unsplash.com/photo-1710162734106-6932b5799f99?crop=entropy&cs=srgb&fm=jpg&ixid=M3w3NTY2NzR8MHwxfHNlYXJjaHwxfHx3YXJtJTIwY29yYWwlMjBwZWFjaCUyMGdyYWRpZW50JTIwbWVzaCUyMHRleHR1cmUlMjBhYnN0cmFjdCUyMGJhY2tncm91bmR8ZW58MHx8fHwxNzg1MTMwMDkzfDA&ixlib=rb-4.1.0&q=85',
-  premiumBg:
-    'https://images.unsplash.com/photo-1667842539494-e1b7146be2ca?crop=entropy&cs=srgb&fm=jpg&ixid=M3w4NjAzMzl8MHwxfHNlYXJjaHwxfHxhYnN0cmFjdCUyMHByZW1pdW0lMjBnb2xkJTIwdGVhbCUyMGdlb21ldHJpYyUyMGJhY2tncm91bmR8ZW58MHx8fHwxNzg1MTMwMDkzfDA&ixlib=rb-4.1.0&q=85',
+  heroMesh: require('../assets/images/hero-mesh.jpg'),
 };
 
 export const CATEGORIES = [

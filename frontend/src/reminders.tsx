@@ -5,7 +5,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import Animated, { FadeInDown, FadeOut, LinearTransition } from 'react-native-reanimated';
 import { theme } from './theme';
 import { BrandAvatar, formatMoney } from './ui';
-import { api, ReminderItem } from './api';
+import { cancelSubscription, keepSubscription, ReminderItem, snoozeSubscription } from './api';
 import { useAuth } from './auth-context';
 
 export function RemindersSection() {
@@ -14,11 +14,11 @@ export function RemindersSection() {
 
   if (!reminders || reminders.length === 0) return null;
 
-  const act = async (id: string, path: string, body?: any) => {
-    setBusyId(id);
+  const act = async (item: ReminderItem, action: () => Promise<unknown>) => {
+    setBusyId(item.id);
     try {
-      await api(`/subscriptions/${id}${path}`, { method: 'POST', body });
-      await Promise.all([refreshReminders(), refreshSubs()]);
+      await action();
+      await refreshSubs();
     } finally {
       setBusyId(null);
     }
@@ -32,7 +32,7 @@ export function RemindersSection() {
         </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.title}>Heads up — charges coming</Text>
-          <Text style={styles.sub}>Review before you're billed. Keep it, or cancel now.</Text>
+          <Text style={styles.sub}>{'Review before you\'re billed. Keep it, or cancel now.'}</Text>
         </View>
       </View>
 
@@ -45,9 +45,9 @@ export function RemindersSection() {
             layout={LinearTransition.duration(240)}
           >
             <ReminderRow item={r} busy={busyId === r.id}
-              onKeep={() => act(r.id, '/keep')}
-              onCancel={() => act(r.id, '/cancel')}
-              onSnooze={() => act(r.id, '/snooze', { days: 3 })}
+              onKeep={() => act(r, () => keepSubscription(r))}
+              onCancel={() => act(r, () => cancelSubscription(r.id))}
+              onSnooze={() => act(r, () => snoozeSubscription(r.id, 3))}
             />
           </Animated.View>
         ))}
@@ -139,7 +139,7 @@ const styles = StyleSheet.create({
   wrap: {
     marginTop: 12, marginHorizontal: 24, padding: 18, borderRadius: 24,
     backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: theme.color.border,
-    shadowColor: '#B84A32', shadowOpacity: 0.08, shadowRadius: 18, shadowOffset: { width: 0, height: 8 },
+    shadowColor: '#B84A32', shadowOpacity: 0.08, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 6,
   },
   header: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
   badgeCircle: {

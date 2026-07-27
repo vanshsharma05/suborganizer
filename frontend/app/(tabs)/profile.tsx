@@ -6,29 +6,18 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { theme } from '@/src/theme';
 import { useAuth } from '@/src/auth-context';
-import { api } from '@/src/api';
+import { updatePrimaryCurrency } from '@/src/api';
 import { CURRENCIES, symbolFor } from '@/src/currency';
 
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { user, logout, subs, refreshSubs, refreshReminders, refreshUser } = useAuth();
-  const [resetting, setResetting] = useState(false);
+  const { user, logout, subs, refreshUser } = useAuth();
   const [savingCur, setSavingCur] = useState(false);
 
   const doLogout = async () => {
     await logout();
     router.replace('/auth');
-  };
-
-  const resetData = async () => {
-    setResetting(true);
-    try {
-      await api('/subscriptions/reset', { method: 'POST' });
-      await Promise.all([refreshSubs(), refreshReminders()]);
-    } finally {
-      setResetting(false);
-    }
   };
 
   const cyclePrimaryCurrency = async () => {
@@ -37,7 +26,7 @@ export default function ProfileScreen() {
     const next = CURRENCIES[(idx + 1) % CURRENCIES.length];
     setSavingCur(true);
     try {
-      await api('/auth/preferences', { method: 'POST', body: { primary_currency: next } });
+      await updatePrimaryCurrency(next);
       await refreshUser();
     } finally {
       setSavingCur(false);
@@ -94,16 +83,6 @@ export default function ProfileScreen() {
             <Text style={styles.statLabel}>{primary}</Text>
           </Pressable>
         </View>
-
-        <Pressable
-          onPress={resetData}
-          disabled={resetting}
-          style={styles.resetBtn}
-          testID="profile-reset-data"
-        >
-          <Ionicons name="refresh-outline" size={16} color={theme.color.ink} />
-          <Text style={styles.resetText}>{resetting ? 'Resetting…' : 'Reset demo data (INR + USD mix)'}</Text>
-        </Pressable>
 
         <View style={styles.list}>
           {rows.map((r) => (

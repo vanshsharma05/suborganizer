@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SubOrganizer — Track every subscription you pay for</title>
+<meta name="description" content="SubOrganizer helps you track recurring subscriptions, see what you spend each month, and get reminded before you are charged.">
+<style>
+  :root {
+    --surface: #FDFBF7; --surface-2: #F4EFE6; --ink: #1A1C1E; --ink-soft: #4A4C4A;
+    --ink-muted: #8A867F; --brand: #E87A5D; --brand-deep: #D36043; --teal: #0D9488;
+    --border: #EAE4D9;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--surface); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.65; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 0 24px; }
+  header {
+    background: linear-gradient(150deg, #FDD6BE 0%, #F4A28C 45%, #E87A5D 100%);
+    padding: 72px 0 84px; text-align: center;
+  }
+  .logo {
+    width: 62px; height: 62px; border-radius: 20px; background: var(--ink);
+    color: #fff; font-size: 30px; font-weight: 800; display: flex;
+    align-items: center; justify-content: center; margin: 0 auto 22px;
+  }
+  h1 { font-size: clamp(30px, 6vw, 44px); letter-spacing: -1.2px; margin: 0 0 12px; font-weight: 800; }
+  .tagline { font-size: clamp(16px, 3vw, 19px); color: #7A2E1B; margin: 0; font-weight: 500; }
+  main { padding: 56px 0 72px; }
+  h2 { font-size: 22px; letter-spacing: -0.5px; margin: 44px 0 14px; font-weight: 700; }
+  h2:first-child { margin-top: 0; }
+  p { color: var(--ink-soft); margin: 0 0 16px; }
+  .features { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin: 28px 0; }
+  .card { background: #fff; border: 1px solid var(--border); border-radius: 18px; padding: 20px; }
+  .card h3 { margin: 0 0 6px; font-size: 15px; font-weight: 700; }
+  .card p { margin: 0; font-size: 14px; }
+  .note {
+    background: var(--surface-2); border-left: 3px solid var(--teal);
+    border-radius: 0 14px 14px 0; padding: 18px 20px; margin: 28px 0;
+  }
+  .note p { margin: 0; font-size: 15px; }
+  footer {
+    border-top: 1px solid var(--border); padding: 32px 0 48px;
+    font-size: 14px; color: var(--ink-muted); text-align: center;
+  }
+  a { color: var(--brand-deep); font-weight: 600; }
+  footer a { margin: 0 10px; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap">
+    <div class="logo">S</div>
+    <h1>SubOrganizer</h1>
+    <p class="tagline">Know exactly what you're subscribed to — and what it costs.</p>
+  </div>
+</header>
+
+<main class="wrap">
+  <h2>What it does</h2>
+  <p>
+    Subscriptions are easy to start and easy to forget. SubOrganizer keeps every
+    recurring payment in one place, shows what you actually spend each month, and
+    warns you before the next charge lands.
+  </p>
+
+  <div class="features">
+    <div class="card">
+      <h3>Track everything</h3>
+      <p>Add any subscription with its amount, billing cycle and renewal date.</p>
+    </div>
+    <div class="card">
+      <h3>See the real total</h3>
+      <p>Monthly and yearly spend, broken down by category.</p>
+    </div>
+    <div class="card">
+      <h3>Never get surprised</h3>
+      <p>Reminders a few days before a payment is taken.</p>
+    </div>
+    <div class="card">
+      <h3>Find forgotten ones</h3>
+      <p>Optionally scan Gmail receipts to spot subscriptions you forgot about.</p>
+    </div>
+  </div>
+
+  <h2>About Gmail scanning</h2>
+  <p>
+    Connecting Gmail is optional — the app works fully without it. If you do
+    connect it, SubOrganizer asks for <strong>read-only</strong> access and uses
+    it for one thing: recognising subscriptions from receipts, welcome emails and
+    cancellation notices.
+  </p>
+  <p>
+    It reads those emails <strong>on your device</strong>. Nothing is uploaded,
+    and the contents of your email are never stored. Only the subscription
+    details you review and approve are saved — a name, an amount, a renewal date.
+    It can never send, delete or change your mail, and you can disconnect at any
+    time.
+  </p>
+
+  <div class="note">
+    <p>
+      SubOrganizer's use of information received from Google APIs follows the
+      <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>,
+      including the Limited Use requirements.
+    </p>
+  </div>
+
+  <h2>Privacy</h2>
+  <p>
+    No ads. No trackers. Nothing sold. Read the full
+    <a href="./privacy.html">privacy policy</a>.
+  </p>
+</main>
+
+<footer class="wrap">
+  <a href="./privacy.html">Privacy Policy</a>
+  <a href="mailto:contact.shoplostandfound@gmail.com">Contact</a>
+  <p style="margin-top:14px">&copy; 2026 SubOrganizer</p>
+</footer>
+
+</body>
+</html>

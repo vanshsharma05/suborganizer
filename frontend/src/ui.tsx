@@ -6,7 +6,11 @@ import { theme } from './theme';
 import { Subscription } from './api';
 import { fmtMoney, symbolFor } from './currency';
 
-export function BrandAvatar({ sub, size = 44 }: { sub: Subscription; size?: number }) {
+// Only the three fields the avatar actually draws from, so callers holding
+// something subscription-shaped — a Gmail scan candidate, say — can use it.
+type Brandable = Pick<Subscription, 'name'> & Partial<Pick<Subscription, 'domain' | 'brand_color'>>;
+
+export function BrandAvatar({ sub, size = 44 }: { sub: Brandable; size?: number }) {
   const initial = sub.name.charAt(0).toUpperCase();
   const bg = sub.brand_color || theme.color.brand;
   const [srcIdx, setSrcIdx] = useState(0);

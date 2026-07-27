@@ -13,7 +13,7 @@ import { theme, IMAGES, CATEGORY_COLORS } from '@/src/theme';
 import { useAuth, monthlyEquivalent } from '@/src/auth-context';
 import { BrandAvatar, formatMoney, formatMoneyRounded } from '@/src/ui';
 import { convertToPrimary, fmtMoney } from '@/src/currency';
-import { api, Subscription } from '@/src/api';
+import { Subscription } from '@/src/api';
 import { differenceInCalendarDays, parseISO, format } from 'date-fns';
 import { RemindersSection } from '@/src/reminders';
 import { getNotifPermission, requestNotifPermission, rescheduleReminders } from '@/src/notifications';
@@ -85,8 +85,6 @@ export default function Dashboard() {
   const router = useRouter();
   const { user, subs, refreshSubs, refreshReminders } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
-  const [scanning, setScanning] = useState(false);
-  const [scanResults, setScanResults] = useState<any[] | null>(null);
   const [notifPromptShown, setNotifPromptShown] = useState(false);
   const [notifState, setNotifState] = useState<'unknown' | 'granted' | 'denied' | 'blocked' | 'unsupported'>('unknown');
 
@@ -139,33 +137,6 @@ export default function Dashboard() {
     setRefreshing(false);
   };
 
-  const runScan = async () => {
-    setScanning(true);
-    setScanResults(null);
-    try {
-      const r = await api<{ discovered: any[] }>('/subscriptions/scan-mail', { method: 'POST' });
-      setScanResults(r.discovered);
-    } finally {
-      setScanning(false);
-    }
-  };
-
-  const addDiscovered = async (item: any) => {
-    const today = new Date();
-    const nextRenew = new Date(today);
-    nextRenew.setDate(today.getDate() + 15);
-    await api<Subscription>('/subscriptions', {
-      method: 'POST',
-      body: {
-        ...item,
-        next_renewal: nextRenew.toISOString().split('T')[0],
-        status: 'active',
-      },
-    });
-    await Promise.all([refreshSubs(), refreshReminders()]);
-    setScanResults((prev) => (prev || []).filter((x) => x.name !== item.name));
-  };
-
   return (
     <View style={{ flex: 1, backgroundColor: theme.color.surface }}>
       <ScrollView
@@ -176,7 +147,7 @@ export default function Dashboard() {
       >
         {/* Hero */}
         <View style={[hStyles.hero, { paddingTop: insets.top + 24 }]}>
-          <Image source={{ uri: IMAGES.heroMesh }} style={StyleSheet.absoluteFillObject} contentFit="cover" />
+          <Image source={IMAGES.heroMesh} style={StyleSheet.absoluteFillObject} contentFit="cover" />
           <LinearGradient
             colors={['rgba(253,251,247,0)', 'rgba(253,251,247,0.35)', theme.color.surface]}
             locations={[0, 0.6, 1]}
@@ -221,7 +192,7 @@ export default function Dashboard() {
             <Ionicons name="notifications-outline" size={18} color={theme.color.brandSecondary} />
             <View style={{ flex: 1 }}>
               <Text style={hStyles.notifTitle}>Get renewal reminders on your phone</Text>
-              <Text style={hStyles.notifSub}>We'll ping you a few days before charges hit.</Text>
+              <Text style={hStyles.notifSub}>{'We\'ll ping you a few days before charges hit.'}</Text>
             </View>
             <Pressable onPress={promptForNotifs} style={hStyles.notifBtn} testID="dashboard-enable-notifs">
               <Text style={hStyles.notifBtnText}>Enable</Text>
@@ -232,56 +203,41 @@ export default function Dashboard() {
         {/* Actions */}
         <View style={hStyles.actionsRow}>
           <Pressable
-            onPress={runScan}
-            style={({ pressed }) => [hStyles.scanBtn, pressed && { opacity: 0.9 }]}
-            testID="dashboard-scan-gmail"
-            disabled={scanning}
-          >
-            <LinearGradient
-              colors={theme.color.proGradient}
-              start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
-              style={hStyles.scanInner}
-            >
-              <Ionicons name="mail-outline" size={18} color="#FFFFFF" />
-              <View style={{ flex: 1 }}>
-                <Text style={hStyles.scanTitle}>{scanning ? 'Scanning inbox…' : 'Scan Gmail for subs'}</Text>
-                <Text style={hStyles.scanSub}>Uncover hidden charges</Text>
-              </View>
-              {scanning ? <ActivityIndicator color="#FFFFFF" /> : (
-                <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
-              )}
-            </LinearGradient>
-          </Pressable>
-          <Pressable
             onPress={() => router.push('/subscription/new')}
             style={({ pressed }) => [hStyles.addBtn, pressed && { opacity: 0.9 }]}
             testID="dashboard-add-sub"
           >
-            <Ionicons name="add" size={26} color={theme.color.ink} />
+            <LinearGradient
+              colors={theme.color.coralGradient}
+              start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}
+              style={hStyles.addInner}
+            >
+              <Ionicons name="add-circle-outline" size={20} color="#FFFFFF" />
+              <View style={{ flex: 1 }}>
+                <Text style={hStyles.addTitle}>Add a subscription</Text>
+                <Text style={hStyles.addSub}>Track what you actually pay for</Text>
+              </View>
+              <Ionicons name="arrow-forward" size={18} color="#FFFFFF" />
+            </LinearGradient>
           </Pressable>
         </View>
 
-        {scanResults && scanResults.length > 0 && (
-          <View style={hStyles.scanResults} testID="dashboard-scan-results">
-            <Text style={hStyles.sectionTitle}>Found in your inbox</Text>
-            {scanResults.map((r) => (
-              <View key={r.name} style={hStyles.scanRow}>
-                <BrandAvatar sub={{ ...r, id: r.name, status: 'active', next_renewal: '' }} size={40} />
-                <View style={{ flex: 1, marginLeft: 12 }}>
-                  <Text style={hStyles.scanRowTitle}>{r.name}</Text>
-                  <Text style={hStyles.scanRowSub}>{formatMoney(r.amount, r.currency)} · {r.billing_cycle}</Text>
-                </View>
-                <Pressable
-                  onPress={() => addDiscovered(r)}
-                  style={hStyles.trackBtn}
-                  testID={`dashboard-track-${r.name}`}
-                >
-                  <Text style={hStyles.trackBtnText}>Track</Text>
-                </Pressable>
-              </View>
-            ))}
+        {/* Gmail scan — reads receipts and cancellation emails to find subs the
+            user never got round to adding by hand. */}
+        <Pressable
+          onPress={() => router.push('/scan')}
+          style={({ pressed }) => [hStyles.scanBtn, pressed && { opacity: 0.9 }]}
+          testID="dashboard-scan-gmail"
+        >
+          <View style={hStyles.scanIcon}>
+            <Ionicons name="mail-open-outline" size={19} color={theme.color.brandSecondary} />
           </View>
-        )}
+          <View style={{ flex: 1 }}>
+            <Text style={hStyles.scanTitle}>Scan Gmail for subscriptions</Text>
+            <Text style={hStyles.scanSub}>Finds what you pay for — and what you already cancelled</Text>
+          </View>
+          <Ionicons name="arrow-forward" size={18} color={theme.color.inkMuted} />
+        </Pressable>
 
         {/* Category donut */}
         <View style={hStyles.section}>
@@ -365,7 +321,7 @@ const hStyles = StyleSheet.create({
   heroCard: {
     marginTop: 28, backgroundColor: 'rgba(255,255,255,0.75)',
     borderRadius: 28, padding: 22, borderWidth: 1, borderColor: 'rgba(255,255,255,0.9)',
-    shadowColor: '#B84A32', shadowOpacity: 0.1, shadowRadius: 20, shadowOffset: { width: 0, height: 10 },
+    shadowColor: '#B84A32', shadowOpacity: 0.1, shadowRadius: 20, shadowOffset: { width: 0, height: 10 }, elevation: 6,
   },
   heroLabel: {
     color: theme.color.brandPrimary, fontSize: 11, fontWeight: '700',
@@ -390,20 +346,21 @@ const hStyles = StyleSheet.create({
   notifBtn: { backgroundColor: theme.color.ink, paddingHorizontal: 14, paddingVertical: 8, borderRadius: theme.radius.pill },
   notifBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 12 },
   actionsRow: { flexDirection: 'row', paddingHorizontal: 24, gap: 12, marginTop: 8 },
-  scanBtn: { flex: 1, borderRadius: 20, overflow: 'hidden' },
-  scanInner: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 16, paddingHorizontal: 16 },
-  scanTitle: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
-  scanSub: { color: 'rgba(255,255,255,0.7)', fontSize: 11, marginTop: 2 },
-  addBtn: { width: 56, height: 56, borderRadius: 18, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: theme.color.border, alignItems: 'center', justifyContent: 'center' },
-  scanResults: {
-    marginTop: 16, marginHorizontal: 24, padding: 16, borderRadius: 20,
-    backgroundColor: theme.color.surfaceSecondary, borderWidth: 1, borderColor: theme.color.border,
+  addBtn: { flex: 1, borderRadius: 20, overflow: 'hidden' },
+  addInner: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 16, paddingHorizontal: 16 },
+  addTitle: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
+  addSub: { color: 'rgba(255,255,255,0.75)', fontSize: 11, marginTop: 2 },
+  scanBtn: {
+    marginHorizontal: 24, marginTop: 12, padding: 14, borderRadius: 20,
+    backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: theme.color.border,
+    flexDirection: 'row', alignItems: 'center', gap: 12,
   },
-  scanRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8 },
-  scanRowTitle: { color: theme.color.ink, fontSize: 15, fontWeight: '700' },
-  scanRowSub: { color: theme.color.inkSoft, fontSize: 12, marginTop: 2 },
-  trackBtn: { backgroundColor: theme.color.ink, paddingHorizontal: 16, paddingVertical: 8, borderRadius: theme.radius.pill },
-  trackBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 12 },
+  scanIcon: {
+    width: 38, height: 38, borderRadius: 13, backgroundColor: theme.color.surfaceSecondary,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  scanTitle: { color: theme.color.ink, fontSize: 14, fontWeight: '700' },
+  scanSub: { color: theme.color.inkSoft, fontSize: 11, marginTop: 2 },
   section: { marginTop: 28 },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, marginBottom: 12 },
   sectionTitle: { color: theme.color.ink, fontSize: 18, fontWeight: '700', letterSpacing: -0.4, paddingHorizontal: 24, marginBottom: 12 },
