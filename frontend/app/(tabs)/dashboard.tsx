@@ -7,7 +7,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import Animated, { FadeInDown, useAnimatedProps, useSharedValue, withTiming, Easing } from 'react-native-reanimated';
+import Animated, { FadeInDown } from 'react-native-reanimated';
 import Svg, { Circle, G } from 'react-native-svg';
 import { theme, IMAGES, CATEGORY_COLORS } from '@/src/theme';
 import { useAuth, monthlyEquivalent } from '@/src/auth-context';
@@ -18,26 +18,30 @@ import { differenceInCalendarDays, parseISO, format } from 'date-fns';
 import { RemindersSection } from '@/src/reminders';
 import { getNotifPermission, requestNotifPermission, rescheduleReminders } from '@/src/notifications';
 
-const AnimatedText = Animated.createAnimatedComponent(Text);
-
 function AnimatedCounter({ value, currency }: { value: number; currency: string }) {
-  const progress = useSharedValue(0);
+  const [displayed, setDisplayed] = useState(0);
   useEffect(() => {
-    progress.value = 0;
-    progress.value = withTiming(value, { duration: 900, easing: Easing.out(Easing.cubic) });
-  }, [value, progress]);
-  const props: any = useAnimatedProps(() => {
-    const t = fmtMoney(progress.value, currency);
-    return { text: t, defaultValue: t };
-  });
+    const start = Date.now();
+    const dur = 900;
+    let raf = 0;
+    const tick = () => {
+      const t = Math.min(1, (Date.now() - start) / dur);
+      const eased = 1 - Math.pow(1 - t, 3); // cubic-out
+      setDisplayed(value * eased);
+      if (t < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [value]);
   return (
-    <AnimatedText
+    <Text
       style={hStyles.heroAmount}
-      animatedProps={props}
       testID="dashboard-total-amount"
       numberOfLines={1}
       adjustsFontSizeToFit
-    >{fmtMoney(value, currency)}</AnimatedText>
+    >
+      {fmtMoney(displayed, currency)}
+    </Text>
   );
 }
 

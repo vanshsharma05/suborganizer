@@ -1,0 +1,25 @@
+{
+  "summary": "Targeted verification of the 'fmtMoney is not a function' Expo Go crash fix. STATIC GREP: audited /app/frontend/app and /app/frontend/src for useAnimatedProps|useAnimatedStyle|useDerivedValue|useAnimatedReaction|runOnUI — only one occurrence remains (useAnimatedStyle in app/(tabs)/_layout.tsx:30, TabItem bgStyle) and its callback references ONLY the shared value scale.value with pure math (opacity + transform.scale). No JS helper from currency.ts or ui.tsx (fmtMoney, symbolFor, convertToPrimary, formatMoney, formatMoneyRounded, toLocaleString) is invoked from any worklet. AnimatedCounter in dashboard.tsx has been correctly rewritten as a JS-only requestAnimationFrame loop with useState + a plain <Text> that calls fmtMoney on the JS thread. RUNTIME SMOKE (web preview at EXPO_BACKEND_URL, mobile viewport 390x844): logged in as demo@suborganizer.app, dashboard-total-amount rendered '$90.27' at T0, animated to '$104.39' by T+0.5s and settled at '$104.39' — matches the expected USD primary total for the seeded demo dataset. No pageerror thrown, no React Native red screen, no 'fmtMoney is not a function'. Regression: all 5 tabs (Home/Subs/Calendar/AI/You) navigate correctly, tab bar spring animation works, add-subscription modal opens and renders form. External brand-logo image fetches fail with ERR_NAME_NOT_RESOLVED (netflix.com etc.) — pre-existing sandbox limitation, unrelated to this fix.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [],
+    "react_native_issues": []
+  },
+  "test_report_links": ["/app/test_reports/iteration_4.json"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Confirmed: dashboard.tsx AnimatedCounter no longer imports useAnimatedProps/useSharedValue/withTiming/Easing and no longer uses Animated.createAnimatedComponent(Text). Implementation is pure JS (requestAnimationFrame + setState + <Text>{fmtMoney(...)}</Text>) — safe on both web and Expo Go native.",
+    "The only remaining Reanimated worklet callback is in _layout.tsx line 30 (useAnimatedStyle for TabItem pill). It reads only scale.value — no JS-thread helpers — so it is Expo Go safe.",
+    "Non-blocking: two deprecation console warnings on web preview only ('shadow* style props deprecated, use boxShadow' and 'props.pointerEvents deprecated') coming from React Native Web's shim layer. These are RN-Web internal warnings, not app bugs — no action needed.",
+    "Non-blocking: External favicon fetches (logo.clearbit-style via brand domains like netflix.com) return ERR_NAME_NOT_RESOLVED inside the sandbox because outbound DNS to public hosts is filtered. Not a regression from this fix; the BrandAvatar fallback renders correctly."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not tested (frontend-only per request)", "frontend": "100%"},
+  "seed_data_creation": "None — used existing seeded demo user (demo@suborganizer.app).",
+  "retest_needed": false,
+  "should_main_agent_self_test": false,
+  "context_for_next_testing_agent": "Bug fix verified. AnimatedCounter rewrite is correct and there is no other worklet-side call into currency.ts/ui.tsx JS helpers anywhere in /app/frontend. Web preview no longer needed to reproduce the original crash — the static grep guarantee is what protects Expo Go native.",
+  "rca_of_issue": "Original crash on Expo Go: dashboard.tsx used Reanimated's useAnimatedProps with a worklet callback that called fmtMoney (a plain JS function imported from src/currency.ts). Reanimated worklets execute on the UI thread (not the JS thread), so imported JS functions are undefined inside them on native — hence 'fmtMoney is not a function'. Web preview did not reproduce because Reanimated on web is a thin shim that runs everything on the JS thread. Fix applied by main agent: replaced the worklet-based counter with a JS-only requestAnimationFrame + useState loop rendering plain <Text>{fmtMoney(displayed, currency)}. Verified via (a) static grep confirming no other worklet call site touches JS currency/format helpers, and (b) runtime smoke on web preview confirming the counter animates and settles on the correct formatted string."
+}
