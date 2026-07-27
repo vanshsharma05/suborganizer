@@ -89,7 +89,7 @@ function ReminderRow({
               <View style={[styles.chipDot, { backgroundColor: urgencyColor }]} />
               <Text style={[styles.chipText, { color: urgencyColor }]}>{urgencyLabel}</Text>
             </View>
-            <Text style={styles.rowSub} numberOfLines={1}>{formatMoney(item.amount)} · {item.billing_cycle}</Text>
+            <Text style={styles.rowSub} numberOfLines={1}>{formatMoney(item.amount, item.currency)} · {item.billing_cycle}</Text>
           </View>
         </View>
       </View>

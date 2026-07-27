@@ -5,14 +5,16 @@ import { useRouter } from 'expo-router';
 import Animated, { FadeInDown } from 'react-native-reanimated';
 import { theme } from '@/src/theme';
 import { useAuth } from '@/src/auth-context';
-import { BrandAvatar, formatMoney } from '@/src/ui';
+import { BrandAvatar, formatMoney, formatMoneyRounded } from '@/src/ui';
+import { convertToPrimary, monthlyEquivalent as monthlyEq } from '@/src/currency';
 import { parseISO, differenceInCalendarDays, format, isSameDay, isToday } from 'date-fns';
 
 export default function CalendarScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { subs, refreshSubs } = useAuth();
+  const { subs, refreshSubs, user } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
+  const primary = (user?.primary_currency || 'INR').toUpperCase();
 
   const timeline = useMemo(() => {
     return subs
@@ -28,8 +30,8 @@ export default function CalendarScreen() {
         const d = differenceInCalendarDays(parseISO(s.next_renewal), now);
         return d >= 0 && d <= 7;
       })
-      .reduce((acc, s) => acc + s.amount, 0);
-  }, [timeline]);
+      .reduce((acc, s) => acc + convertToPrimary(s.amount, s.currency, primary), 0);
+  }, [timeline, primary]);
 
   const total30 = useMemo(() => {
     const now = new Date();
@@ -38,8 +40,8 @@ export default function CalendarScreen() {
         const d = differenceInCalendarDays(parseISO(s.next_renewal), now);
         return d >= 0 && d <= 30;
       })
-      .reduce((acc, s) => acc + s.amount, 0);
-  }, [timeline]);
+      .reduce((acc, s) => acc + convertToPrimary(s.amount, s.currency, primary), 0);
+  }, [timeline, primary]);
 
   const onRefresh = async () => { setRefreshing(true); await refreshSubs(); setRefreshing(false); };
 
@@ -55,11 +57,11 @@ export default function CalendarScreen() {
 
         <View style={styles.summaryRow}>
           <View style={styles.summaryCard}>
-            <Text style={styles.summaryVal}>{formatMoney(total7)}</Text>
+            <Text style={styles.summaryVal}>{formatMoneyRounded(total7, primary)}</Text>
             <Text style={styles.summaryLabel}>Next 7 days</Text>
           </View>
           <View style={[styles.summaryCard, { backgroundColor: theme.color.ink }]}>
-            <Text style={[styles.summaryVal, { color: '#FFFFFF' }]}>{formatMoney(total30)}</Text>
+            <Text style={[styles.summaryVal, { color: '#FFFFFF' }]}>{formatMoneyRounded(total30, primary)}</Text>
             <Text style={[styles.summaryLabel, { color: 'rgba(255,255,255,0.6)' }]}>Next 30 days</Text>
           </View>
         </View>
@@ -92,7 +94,7 @@ export default function CalendarScreen() {
                         <Text style={styles.nodeName}>{s.name}</Text>
                         <Text style={styles.nodeCategory}>{s.category}</Text>
                       </View>
-                      <Text style={styles.nodeAmt}>{formatMoney(s.amount)}</Text>
+                      <Text style={styles.nodeAmt}>{formatMoney(s.amount, s.currency)}</Text>
                     </View>
                   </View>
                 </Pressable>

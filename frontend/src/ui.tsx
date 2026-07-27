@@ -1,38 +1,48 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, Pressable, ViewStyle, TextStyle } from 'react-native';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { theme } from './theme';
 import { Subscription } from './api';
+import { fmtMoney, symbolFor } from './currency';
 
 export function BrandAvatar({ sub, size = 44 }: { sub: Subscription; size?: number }) {
   const initial = sub.name.charAt(0).toUpperCase();
   const bg = sub.brand_color || theme.color.brand;
+  const [srcIdx, setSrcIdx] = useState(0);
+  const sources = sub.domain ? [
+    `https://logo.clearbit.com/${sub.domain}`,
+    `https://www.google.com/s2/favicons?domain=${sub.domain}&sz=128`,
+    `https://icons.duckduckgo.com/ip3/${sub.domain}.ico`,
+  ] : [];
+
+  const showFallback = !sub.domain || srcIdx >= sources.length;
+
   return (
     <View
       style={[
         stylesAv.wrap,
-        { width: size, height: size, borderRadius: size * 0.28, backgroundColor: bg + '18', borderColor: bg + '35' },
+        { width: size, height: size, borderRadius: size * 0.28, backgroundColor: showFallback ? bg : '#FFFFFF', borderColor: bg + '35' },
       ]}
     >
-      {sub.domain ? (
+      {showFallback ? (
+        <Text style={{ color: '#FFFFFF', fontSize: size * 0.42, fontWeight: '800' }}>{initial}</Text>
+      ) : (
         <Image
-          source={{ uri: `https://logo.clearbit.com/${sub.domain}` }}
-          style={{ width: size * 0.72, height: size * 0.72, borderRadius: size * 0.18 }}
+          source={{ uri: sources[srcIdx] }}
+          style={{ width: size * 0.78, height: size * 0.78, borderRadius: size * 0.18 }}
           contentFit="contain"
           transition={200}
-          onError={() => {}}
-          placeholder={undefined}
+          onError={() => setSrcIdx((i) => i + 1)}
+          cachePolicy="memory-disk"
         />
-      ) : (
-        <Text style={{ color: bg, fontSize: size * 0.42, fontWeight: '800' }}>{initial}</Text>
       )}
     </View>
   );
 }
 
 const stylesAv = StyleSheet.create({
-  wrap: { alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
+  wrap: { alignItems: 'center', justifyContent: 'center', borderWidth: 1, overflow: 'hidden' },
 });
 
 export function GradientButton({
@@ -99,9 +109,9 @@ const pillStyles = StyleSheet.create({
   label: { color: theme.color.inkSoft, fontSize: 11, fontWeight: '600', letterSpacing: 0.6, textTransform: 'uppercase', marginTop: 2 },
 });
 
-export function formatMoney(n: number): string {
-  return `$${n.toFixed(2)}`;
+export function formatMoney(n: number, currency?: string): string {
+  return fmtMoney(n, currency);
 }
-export function formatMoneyRounded(n: number): string {
-  return `$${Math.round(n).toLocaleString()}`;
+export function formatMoneyRounded(n: number, currency?: string): string {
+  return fmtMoney(n, currency, { compact: true });
 }

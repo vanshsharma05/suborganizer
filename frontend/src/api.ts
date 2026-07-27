@@ -47,6 +47,7 @@ export type Subscription = {
   id: string;
   name: string;
   amount: number;
+  currency?: string;  // 'INR' | 'USD' | 'EUR' etc.
   billing_cycle: 'monthly' | 'yearly' | 'weekly';
   category: string;
   next_renewal: string;
@@ -61,4 +62,4 @@ export type Subscription = {
 
 export type ReminderItem = Subscription & { days_left: number; urgency: 'overdue' | 'today' | 'soon' | 'upcoming' };
 
-export type User = { id: string; email: string; name: string; is_pro: boolean };
+export type User = { id: string; email: string; name: string; is_pro: boolean; primary_currency?: string };

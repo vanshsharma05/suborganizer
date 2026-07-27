@@ -9,6 +9,7 @@ import { theme, CATEGORIES } from '@/src/theme';
 import { useAuth } from '@/src/auth-context';
 import { api, Subscription } from '@/src/api';
 import { GradientButton, Chip } from '@/src/ui';
+import { CURRENCIES, symbolFor } from '@/src/currency';
 import { format } from 'date-fns';
 
 export default function SubscriptionForm() {
@@ -22,6 +23,7 @@ export default function SubscriptionForm() {
 
   const [name, setName] = useState(existing?.name ?? '');
   const [amount, setAmount] = useState(existing?.amount ? String(existing.amount) : '');
+  const [currency, setCurrency] = useState<string>(existing?.currency ?? 'INR');
   const [cycle, setCycle] = useState<'monthly' | 'yearly' | 'weekly'>((existing?.billing_cycle as any) ?? 'monthly');
   const [category, setCategory] = useState(existing?.category ?? 'Entertainment');
   const [domain, setDomain] = useState(existing?.domain ?? '');
@@ -44,6 +46,7 @@ export default function SubscriptionForm() {
     try {
       const body = {
         name: name.trim(), amount: num, billing_cycle: cycle, category,
+        currency,
         next_renewal: date, domain: domain.trim() || null, notes: notes.trim() || null,
         status: existing?.status || 'active',
         reminder_days_before: reminderDays,
@@ -112,10 +115,20 @@ export default function SubscriptionForm() {
         <ScrollView contentContainerStyle={{ padding: 24, paddingBottom: 200 }} keyboardShouldPersistTaps="handled">
           <Text style={styles.sectionLbl}>Amount</Text>
           <View style={styles.amountRow}>
-            <Text style={styles.currency}>$</Text>
+            <Pressable
+              onPress={() => {
+                const idx = CURRENCIES.indexOf(currency as any);
+                setCurrency(CURRENCIES[(idx + 1) % CURRENCIES.length]);
+              }}
+              style={styles.currencyBtn}
+              testID="form-currency"
+            >
+              <Text style={styles.currencyText}>{symbolFor(currency)}</Text>
+              <Text style={styles.currencyCode}>{currency}</Text>
+            </Pressable>
             <TextInput
               value={amount} onChangeText={setAmount}
-              placeholder="0.00" placeholderTextColor={theme.color.inkMuted}
+              placeholder="0" placeholderTextColor={theme.color.inkMuted}
               keyboardType="decimal-pad" style={styles.amountInput}
               testID="form-amount"
             />
@@ -216,8 +229,14 @@ const styles = StyleSheet.create({
   iconBtn: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { color: theme.color.ink, fontSize: 16, fontWeight: '700' },
   sectionLbl: { color: theme.color.brandPrimary, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, textTransform: 'uppercase', marginTop: 20, marginBottom: 10 },
-  amountRow: { flexDirection: 'row', alignItems: 'flex-end', paddingHorizontal: 4 },
-  currency: { color: theme.color.inkSoft, fontSize: 36, fontWeight: '700', marginRight: 4, marginBottom: 6 },
+  amountRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 4, gap: 12 },
+  currencyBtn: {
+    alignItems: 'center', paddingHorizontal: 14, paddingVertical: 10,
+    borderRadius: 14, backgroundColor: theme.color.surfaceSecondary,
+    borderWidth: 1, borderColor: theme.color.border,
+  },
+  currencyText: { color: theme.color.ink, fontSize: 28, fontWeight: '800', lineHeight: 32 },
+  currencyCode: { color: theme.color.inkSoft, fontSize: 10, fontWeight: '700', letterSpacing: 0.6, marginTop: 2 },
   amountInput: { flex: 1, fontSize: 48, fontWeight: '800', color: theme.color.ink, letterSpacing: -1.5, paddingVertical: 0 },
   cycleRow: { flexDirection: 'row', backgroundColor: theme.color.surfaceSecondary, borderRadius: theme.radius.pill, padding: 4 },
   cycleBtn: { flex: 1, height: 42, borderRadius: theme.radius.pill, alignItems: 'center', justifyContent: 'center' },

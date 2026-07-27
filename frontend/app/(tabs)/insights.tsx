@@ -8,10 +8,12 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { theme, IMAGES, CATEGORY_COLORS } from '@/src/theme';
 import { useAuth } from '@/src/auth-context';
-import { formatMoney } from '@/src/ui';
+import { formatMoney, formatMoneyRounded } from '@/src/ui';
+import { fmtMoney } from '@/src/currency';
 import { api } from '@/src/api';
 
 type Insight = {
+  primary_currency: string;
   monthly_total: number;
   yearly_projected: number;
   top_category: string;
@@ -81,12 +83,12 @@ export default function InsightsScreen() {
                 <Text style={styles.aiText}>{data.basic_summary}</Text>
                 <View style={styles.aiStats}>
                   <View style={styles.aiStat}>
-                    <Text style={styles.aiStatVal}>{formatMoney(data.monthly_total)}</Text>
+                    <Text style={styles.aiStatVal} numberOfLines={1} adjustsFontSizeToFit>{formatMoneyRounded(data.monthly_total, data.primary_currency)}</Text>
                     <Text style={styles.aiStatLabel}>Monthly</Text>
                   </View>
                   <View style={styles.aiDivider} />
                   <View style={styles.aiStat}>
-                    <Text style={styles.aiStatVal}>{formatMoney(data.yearly_projected)}</Text>
+                    <Text style={styles.aiStatVal} numberOfLines={1} adjustsFontSizeToFit>{formatMoneyRounded(data.yearly_projected, data.primary_currency)}</Text>
                     <Text style={styles.aiStatLabel}>Yearly</Text>
                   </View>
                   <View style={styles.aiDivider} />

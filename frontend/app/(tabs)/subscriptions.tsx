@@ -7,6 +7,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { theme } from '@/src/theme';
 import { useAuth, monthlyEquivalent } from '@/src/auth-context';
 import { BrandAvatar, Chip, formatMoney } from '@/src/ui';
+import { fmtMoney } from '@/src/currency';
 import { parseISO, differenceInCalendarDays, format } from 'date-fns';
 
 export default function SubscriptionsScreen() {
@@ -92,10 +93,10 @@ export default function SubscriptionsScreen() {
                   </Text>
                 </View>
                 <View style={{ alignItems: 'flex-end' }}>
-                  <Text style={styles.amount}>{formatMoney(item.amount)}</Text>
+                  <Text style={styles.amount}>{formatMoney(item.amount, item.currency)}</Text>
                   <Text style={styles.cycle}>/{item.billing_cycle.slice(0, 2)}</Text>
                   {item.billing_cycle !== 'monthly' && (
-                    <Text style={styles.monthly}>{formatMoney(monthly)}/mo</Text>
+                    <Text style={styles.monthly}>{fmtMoney(monthly, item.currency)}/mo</Text>
                   )}
                 </View>
               </Pressable>

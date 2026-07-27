@@ -11,7 +11,8 @@ import Animated, { FadeInDown, useAnimatedProps, useSharedValue, withTiming, Eas
 import Svg, { Circle, G } from 'react-native-svg';
 import { theme, IMAGES, CATEGORY_COLORS } from '@/src/theme';
 import { useAuth, monthlyEquivalent } from '@/src/auth-context';
-import { BrandAvatar, formatMoney } from '@/src/ui';
+import { BrandAvatar, formatMoney, formatMoneyRounded } from '@/src/ui';
+import { convertToPrimary, fmtMoney } from '@/src/currency';
 import { api, Subscription } from '@/src/api';
 import { differenceInCalendarDays, parseISO, format } from 'date-fns';
 import { RemindersSection } from '@/src/reminders';
@@ -19,22 +20,24 @@ import { getNotifPermission, requestNotifPermission, rescheduleReminders } from 
 
 const AnimatedText = Animated.createAnimatedComponent(Text);
 
-function AnimatedCounter({ value }: { value: number }) {
+function AnimatedCounter({ value, currency }: { value: number; currency: string }) {
   const progress = useSharedValue(0);
   useEffect(() => {
     progress.value = 0;
     progress.value = withTiming(value, { duration: 900, easing: Easing.out(Easing.cubic) });
   }, [value, progress]);
-  const props: any = useAnimatedProps(() => ({
-    text: `$${progress.value.toFixed(2)}`,
-    defaultValue: `$${progress.value.toFixed(2)}`,
-  }));
+  const props: any = useAnimatedProps(() => {
+    const t = fmtMoney(progress.value, currency);
+    return { text: t, defaultValue: t };
+  });
   return (
     <AnimatedText
       style={hStyles.heroAmount}
       animatedProps={props}
       testID="dashboard-total-amount"
-    >{`$${value.toFixed(2)}`}</AnimatedText>
+      numberOfLines={1}
+      adjustsFontSizeToFit
+    >{fmtMoney(value, currency)}</AnimatedText>
   );
 }
 
@@ -103,14 +106,22 @@ export default function Dashboard() {
   };
 
   const activeSubs = subs.filter((s) => s.status === 'active');
-  const monthly = useMemo(() => activeSubs.reduce((sum, s) => sum + monthlyEquivalent(s), 0), [activeSubs]);
+  const primaryCurrency = (user?.primary_currency || 'INR').toUpperCase();
+
+  const monthly = useMemo(
+    () => activeSubs.reduce((sum, s) => sum + convertToPrimary(monthlyEquivalent(s), s.currency, primaryCurrency), 0),
+    [activeSubs, primaryCurrency],
+  );
   const yearly = monthly * 12;
 
   const byCat = useMemo(() => {
     const m: Record<string, number> = {};
-    activeSubs.forEach((s) => { m[s.category] = (m[s.category] || 0) + monthlyEquivalent(s); });
+    activeSubs.forEach((s) => {
+      const v = convertToPrimary(monthlyEquivalent(s), s.currency, primaryCurrency);
+      m[s.category] = (m[s.category] || 0) + v;
+    });
     return Object.entries(m).map(([key, value]) => ({ key, value })).sort((a, b) => b.value - a.value);
-  }, [activeSubs]);
+  }, [activeSubs, primaryCurrency]);
 
   const upcoming = useMemo(() => {
     return [...activeSubs]
@@ -182,12 +193,12 @@ export default function Dashboard() {
           </View>
 
           <Animated.View entering={FadeInDown.duration(500)} style={hStyles.heroCard}>
-            <Text style={hStyles.heroLabel}>Total monthly</Text>
-            <AnimatedCounter value={monthly} />
+            <Text style={hStyles.heroLabel}>Total monthly · {primaryCurrency}</Text>
+            <AnimatedCounter value={monthly} currency={primaryCurrency} />
             <View style={hStyles.heroRow}>
               <View style={hStyles.heroChip}>
                 <Ionicons name="trending-up" size={14} color={theme.color.brandSecondary} />
-                <Text style={hStyles.heroChipText}>{formatMoney(yearly)} / year</Text>
+                <Text style={hStyles.heroChipText}>{formatMoneyRounded(yearly, primaryCurrency)} / year</Text>
               </View>
               <View style={hStyles.heroChip}>
                 <View style={[hStyles.dot, { backgroundColor: theme.color.brandPrimary }]} />
@@ -254,7 +265,7 @@ export default function Dashboard() {
                 <BrandAvatar sub={{ ...r, id: r.name, status: 'active', next_renewal: '' }} size={40} />
                 <View style={{ flex: 1, marginLeft: 12 }}>
                   <Text style={hStyles.scanRowTitle}>{r.name}</Text>
-                  <Text style={hStyles.scanRowSub}>{formatMoney(r.amount)} · {r.billing_cycle}</Text>
+                  <Text style={hStyles.scanRowSub}>{formatMoney(r.amount, r.currency)} · {r.billing_cycle}</Text>
                 </View>
                 <Pressable
                   onPress={() => addDiscovered(r)}
@@ -277,7 +288,7 @@ export default function Dashboard() {
                 <View>
                   <DonutChart data={byCat} total={monthly} />
                   <View style={hStyles.donutCenter} pointerEvents="none">
-                    <Text style={hStyles.donutTotal}>{formatMoney(monthly)}</Text>
+                    <Text style={hStyles.donutTotal}>{formatMoneyRounded(monthly, primaryCurrency)}</Text>
                     <Text style={hStyles.donutLabel}>per month</Text>
                   </View>
                 </View>
@@ -286,7 +297,7 @@ export default function Dashboard() {
                     <View key={c.key} style={hStyles.legendRow}>
                       <View style={[hStyles.legendDot, { backgroundColor: CATEGORY_COLORS[c.key] || theme.color.brand }]} />
                       <Text style={hStyles.legendKey} numberOfLines={1}>{c.key}</Text>
-                      <Text style={hStyles.legendVal}>{formatMoney(c.value)}</Text>
+                      <Text style={hStyles.legendVal}>{formatMoneyRounded(c.value, primaryCurrency)}</Text>
                     </View>
                   ))}
                 </View>
@@ -317,7 +328,7 @@ export default function Dashboard() {
                   >
                     <BrandAvatar sub={s} size={40} />
                     <Text style={hStyles.upcomingName} numberOfLines={1}>{s.name}</Text>
-                    <Text style={hStyles.upcomingAmt}>{formatMoney(s.amount)}</Text>
+                    <Text style={hStyles.upcomingAmt}>{formatMoney(s.amount, s.currency)}</Text>
                     <View style={hStyles.upcomingDaysWrap}>
                       <Text style={hStyles.upcomingDays}>
                         {daysLeft <= 0 ? 'Today' : `in ${daysLeft}d`}

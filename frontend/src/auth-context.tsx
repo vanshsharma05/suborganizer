@@ -103,6 +103,8 @@ export function useAuth() {
 }
 
 // Helpers
+export { monthlyEquivalent as monthlyEquivalentAmount } from './currency';
+
 export function monthlyEquivalent(sub: Subscription): number {
   if (sub.billing_cycle === 'yearly') return sub.amount / 12;
   if (sub.billing_cycle === 'weekly') return sub.amount * 4.33;
