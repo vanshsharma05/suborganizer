@@ -46,13 +46,14 @@ export default function SubscriptionForm() {
         name: name.trim(), amount: num, billing_cycle: cycle, category,
         next_renewal: date, domain: domain.trim() || null, notes: notes.trim() || null,
         status: existing?.status || 'active',
+        reminder_days_before: reminderDays,
       };
       if (isNew) {
         await api<Subscription>('/subscriptions', { method: 'POST', body });
       } else {
         await api<Subscription>(`/subscriptions/${id}`, { method: 'PUT', body });
       }
-      await refreshSubs();
+      await Promise.all([refreshSubs(), refreshReminders()]);
       router.back();
     } catch (e: any) {
       setErr(e.message || 'Save failed');
