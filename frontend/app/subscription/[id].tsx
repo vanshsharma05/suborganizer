@@ -16,7 +16,7 @@ export default function SubscriptionForm() {
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const isNew = !id || id === 'new';
-  const { subs, refreshSubs } = useAuth();
+  const { subs, refreshSubs, refreshReminders } = useAuth();
 
   const existing = !isNew ? subs.find((s) => s.id === id) : undefined;
 
@@ -26,6 +26,7 @@ export default function SubscriptionForm() {
   const [category, setCategory] = useState(existing?.category ?? 'Entertainment');
   const [domain, setDomain] = useState(existing?.domain ?? '');
   const [notes, setNotes] = useState(existing?.notes ?? '');
+  const [reminderDays, setReminderDays] = useState<number>(existing?.reminder_days_before ?? 3);
   const [date, setDate] = useState(() => {
     if (existing?.next_renewal) return existing.next_renewal;
     const d = new Date(); d.setDate(d.getDate() + 30);
@@ -78,7 +79,7 @@ export default function SubscriptionForm() {
             <Pressable
               onPress={async () => {
                 await api(`/subscriptions/${existing.id}/toggle`, { method: 'POST' });
-                await refreshSubs();
+                await Promise.all([refreshSubs(), refreshReminders()]);
                 router.back();
               }}
               style={styles.iconBtn}
@@ -92,7 +93,7 @@ export default function SubscriptionForm() {
             <Pressable
               onPress={async () => {
                 await api(`/subscriptions/${existing.id}`, { method: 'DELETE' });
-                await refreshSubs();
+                await Promise.all([refreshSubs(), refreshReminders()]);
                 router.back();
               }}
               style={styles.iconBtn}
@@ -170,6 +171,22 @@ export default function SubscriptionForm() {
             </Pressable>
           </View>
 
+          <Text style={styles.sectionLbl}>Remind me before charge</Text>
+          <View style={styles.reminderRow}>
+            {[1, 3, 7, 14].map((d) => (
+              <Pressable
+                key={d}
+                onPress={() => setReminderDays(d)}
+                style={[styles.reminderBtn, reminderDays === d && styles.reminderBtnActive]}
+                testID={`form-remind-${d}`}
+              >
+                <Text style={[styles.reminderTxt, reminderDays === d && styles.reminderTxtActive]}>
+                  {d}d before
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+
           <Text style={styles.sectionLbl}>Notes</Text>
           <TextInput
             value={notes || ''} onChangeText={setNotes}
@@ -213,6 +230,15 @@ const styles = StyleSheet.create({
   dateBumps: { flexDirection: 'row', gap: 8, marginTop: 8 },
   bumpBtn: { paddingHorizontal: 14, height: 36, borderRadius: theme.radius.pill, backgroundColor: theme.color.surfaceSecondary, alignItems: 'center', justifyContent: 'center' },
   bumpTxt: { color: theme.color.ink, fontWeight: '700', fontSize: 13 },
+  reminderRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+  reminderBtn: {
+    paddingHorizontal: 14, height: 40, borderRadius: theme.radius.pill,
+    backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: theme.color.border,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  reminderBtnActive: { backgroundColor: theme.color.ink, borderColor: theme.color.ink },
+  reminderTxt: { color: theme.color.inkSoft, fontSize: 13, fontWeight: '600' },
+  reminderTxtActive: { color: '#FFFFFF', fontWeight: '700' },
   err: { color: theme.color.error, marginTop: 14, fontWeight: '600' },
   footer: { position: 'absolute', left: 0, right: 0, bottom: 0, padding: 20, backgroundColor: theme.color.surface, borderTopWidth: 1, borderTopColor: theme.color.border },
   busyBtn: { height: 56, borderRadius: theme.radius.pill, backgroundColor: theme.color.brandDeep, alignItems: 'center', justifyContent: 'center' },

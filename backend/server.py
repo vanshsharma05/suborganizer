@@ -54,6 +54,8 @@ class SubscriptionIn(BaseModel):
     brand_color: Optional[str] = None
     notes: Optional[str] = None
     status: Optional[str] = "active"  # active | paused | cancelled
+    reminder_days_before: Optional[int] = 3
+    snoozed_until: Optional[str] = None  # ISO date; hide reminder until this date
 
 class SubscriptionOut(SubscriptionIn):
     id: str
@@ -120,6 +122,8 @@ async def seed_subscriptions(user_id: str):
             "brand_color": s["brand_color"],
             "notes": None,
             "status": "active",
+            "reminder_days_before": 3,
+            "snoozed_until": None,
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
     if docs:
@@ -137,8 +141,29 @@ def serialize_sub(doc: dict) -> dict:
         "brand_color": doc.get("brand_color"),
         "notes": doc.get("notes"),
         "status": doc.get("status", "active"),
+        "reminder_days_before": doc.get("reminder_days_before", 3),
+        "snoozed_until": doc.get("snoozed_until"),
         "created_at": doc.get("created_at"),
     }
+
+def advance_renewal(next_renewal_iso: str, cycle: str) -> str:
+    d = datetime.fromisoformat(next_renewal_iso).date()
+    if cycle == "yearly":
+        try:
+            d = d.replace(year=d.year + 1)
+        except ValueError:
+            d = d.replace(month=2, day=28, year=d.year + 1)
+    elif cycle == "weekly":
+        d = d + timedelta(days=7)
+    else:  # monthly
+        m = d.month + 1
+        y = d.year + (1 if m > 12 else 0)
+        m = ((m - 1) % 12) + 1
+        # clamp day for months with fewer days
+        import calendar as _cal
+        last = _cal.monthrange(y, m)[1]
+        d = d.replace(year=y, month=m, day=min(d.day, last))
+    return d.isoformat()
 
 # ---------------- Auth Routes ----------------
 @api_router.post("/auth/signup", response_model=AuthOut)
@@ -238,6 +263,80 @@ async def scan_mail(user: dict = Depends(get_current_user)):
     import random
     picks = random.sample(GMAIL_SCAN_POOL, k=3)
     return {"discovered": picks}
+
+# ---------------- Reminders ----------------
+class SnoozeIn(BaseModel):
+    days: int = 1
+
+@api_router.get("/reminders")
+async def get_reminders(user: dict = Depends(get_current_user)):
+    """Return active subs whose renewal is within their `reminder_days_before` window,
+    ordered by soonest first. Excludes snoozed reminders."""
+    docs = await db.subscriptions.find(
+        {"user_id": user["id"], "status": "active"}, {"_id": 0}
+    ).to_list(500)
+    today = datetime.now(timezone.utc).date()
+    items = []
+    for d in docs:
+        renew = datetime.fromisoformat(d["next_renewal"]).date()
+        days_left = (renew - today).days
+        window = d.get("reminder_days_before", 3) or 3
+        snoozed_until = d.get("snoozed_until")
+        if snoozed_until:
+            try:
+                snz = datetime.fromisoformat(snoozed_until).date()
+                if snz > today:
+                    continue
+            except Exception:
+                pass
+        if days_left <= window:
+            items.append({
+                **serialize_sub(d),
+                "days_left": days_left,
+                "urgency": "overdue" if days_left < 0 else ("today" if days_left == 0 else ("soon" if days_left <= 2 else "upcoming")),
+            })
+    items.sort(key=lambda x: x["days_left"])
+    return {"items": items, "count": len(items)}
+
+@api_router.post("/subscriptions/{sub_id}/keep")
+async def keep_sub(sub_id: str, user: dict = Depends(get_current_user)):
+    """User confirmed they want to keep it — advance renewal by one cycle and clear snooze."""
+    doc = await db.subscriptions.find_one({"id": sub_id, "user_id": user["id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Not found")
+    new_renew = advance_renewal(doc["next_renewal"], doc["billing_cycle"])
+    await db.subscriptions.update_one(
+        {"id": sub_id, "user_id": user["id"]},
+        {"$set": {"next_renewal": new_renew, "snoozed_until": None}},
+    )
+    doc["next_renewal"] = new_renew
+    doc["snoozed_until"] = None
+    return serialize_sub(doc)
+
+@api_router.post("/subscriptions/{sub_id}/cancel")
+async def cancel_sub(sub_id: str, user: dict = Depends(get_current_user)):
+    doc = await db.subscriptions.find_one_and_update(
+        {"id": sub_id, "user_id": user["id"]},
+        {"$set": {"status": "cancelled"}},
+        projection={"_id": 0},
+        return_document=True,
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="Not found")
+    return serialize_sub(doc)
+
+@api_router.post("/subscriptions/{sub_id}/snooze")
+async def snooze_sub(sub_id: str, data: SnoozeIn, user: dict = Depends(get_current_user)):
+    doc = await db.subscriptions.find_one({"id": sub_id, "user_id": user["id"]}, {"_id": 0})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Not found")
+    until = (datetime.now(timezone.utc).date() + timedelta(days=max(1, data.days))).isoformat()
+    await db.subscriptions.update_one(
+        {"id": sub_id, "user_id": user["id"]},
+        {"$set": {"snoozed_until": until}},
+    )
+    doc["snoozed_until"] = until
+    return serialize_sub(doc)
 
 # ---------------- AI Insights ----------------
 class InsightsOut(BaseModel):

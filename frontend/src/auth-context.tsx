@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useCallback } from 'react';
-import { api, clearToken, getToken, saveToken, User, Subscription } from './api';
+import { api, clearToken, getToken, saveToken, User, Subscription, ReminderItem } from './api';
 
 type AuthCtx = {
   user: User | null;
@@ -10,6 +10,8 @@ type AuthCtx = {
   refreshUser: () => Promise<void>;
   subs: Subscription[];
   refreshSubs: () => Promise<void>;
+  reminders: ReminderItem[];
+  refreshReminders: () => Promise<void>;
   setPro: (v: boolean) => void;
 };
 
@@ -19,6 +21,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [subs, setSubs] = useState<Subscription[]>([]);
+  const [reminders, setReminders] = useState<ReminderItem[]>([]);
 
   const refreshUser = useCallback(async () => {
     try {
@@ -39,16 +42,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const refreshReminders = useCallback(async () => {
+    try {
+      const r = await api<{ items: ReminderItem[]; count: number }>('/reminders');
+      setReminders(r.items);
+    } catch (e) {
+      // silently ignore
+    }
+  }, []);
+
   useEffect(() => {
     (async () => {
       const t = await getToken();
       if (t) {
         await refreshUser();
-        await refreshSubs();
+        await Promise.all([refreshSubs(), refreshReminders()]);
       }
       setLoading(false);
     })();
-  }, [refreshUser, refreshSubs]);
+  }, [refreshUser, refreshSubs, refreshReminders]);
 
   const login = async (email: string, password: string) => {
     const r = await api<{ token: string; user: User }>('/auth/login', {
@@ -56,7 +68,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
     await saveToken(r.token);
     setUser(r.user);
-    await refreshSubs();
+    await Promise.all([refreshSubs(), refreshReminders()]);
   };
 
   const signup = async (name: string, email: string, password: string) => {
@@ -65,19 +77,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
     await saveToken(r.token);
     setUser(r.user);
-    await refreshSubs();
+    await Promise.all([refreshSubs(), refreshReminders()]);
   };
 
   const logout = async () => {
     await clearToken();
     setUser(null);
     setSubs([]);
+    setReminders([]);
   };
 
   const setPro = (v: boolean) => setUser((u) => (u ? { ...u, is_pro: v } : u));
 
   return (
-    <Ctx.Provider value={{ user, loading, login, signup, logout, refreshUser, subs, refreshSubs, setPro }}>
+    <Ctx.Provider value={{ user, loading, login, signup, logout, refreshUser, subs, refreshSubs, reminders, refreshReminders, setPro }}>
       {children}
     </Ctx.Provider>
   );

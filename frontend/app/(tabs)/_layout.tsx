@@ -18,6 +18,8 @@ const ICONS: Record<string, { active: any; inactive: any; label: string }> = {
 
 function TabBar({ state, descriptors, navigation }: any) {
   const insets = useSafeAreaInsets();
+  const { reminders } = useAuth();
+  const reminderCount = reminders?.length ?? 0;
   return (
     <View style={[tbStyles.wrap, { paddingBottom: Math.max(insets.bottom, 12) }]} testID="tab-bar">
       <BlurView intensity={40} tint="light" style={tbStyles.blur}>
@@ -25,6 +27,7 @@ function TabBar({ state, descriptors, navigation }: any) {
           {state.routes.map((route: any, idx: number) => {
             const meta = ICONS[route.name] || { active: 'ellipse', inactive: 'ellipse-outline', label: route.name };
             const focused = state.index === idx;
+            const showBadge = route.name === 'dashboard' && reminderCount > 0;
             const onPress = () => {
               const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
               if (!focused && !event.defaultPrevented) navigation.navigate(route.name);
@@ -42,6 +45,11 @@ function TabBar({ state, descriptors, navigation }: any) {
                     size={20}
                     color={focused ? '#FFFFFF' : theme.color.inkSoft}
                   />
+                  {showBadge && (
+                    <View style={tbStyles.badge} testID="tab-badge-dashboard">
+                      <Text style={tbStyles.badgeText}>{reminderCount > 9 ? '9+' : reminderCount}</Text>
+                    </View>
+                  )}
                 </View>
                 <Text style={[tbStyles.label, focused && tbStyles.labelActive]}>{meta.label}</Text>
               </Pressable>
@@ -66,6 +74,13 @@ const tbStyles = StyleSheet.create({
   item: { flex: 1, alignItems: 'center', gap: 4, paddingVertical: 4 },
   iconWrap: { width: 40, height: 32, borderRadius: theme.radius.pill, alignItems: 'center', justifyContent: 'center' },
   iconWrapActive: { backgroundColor: theme.color.ink },
+  badge: {
+    position: 'absolute', top: -3, right: 4, minWidth: 16, height: 16, paddingHorizontal: 4,
+    borderRadius: 8, backgroundColor: theme.color.brandPrimary,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 2, borderColor: 'rgba(253,251,247,0.95)',
+  },
+  badgeText: { color: '#FFFFFF', fontSize: 9, fontWeight: '800' },
   label: { fontSize: 10, fontWeight: '600', color: theme.color.inkSoft, letterSpacing: 0.3 },
   labelActive: { color: theme.color.ink },
 });

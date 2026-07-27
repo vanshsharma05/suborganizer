@@ -54,7 +54,11 @@ export type Subscription = {
   brand_color?: string | null;
   notes?: string | null;
   status: 'active' | 'paused' | 'cancelled';
+  reminder_days_before?: number;
+  snoozed_until?: string | null;
   created_at?: string;
 };
+
+export type ReminderItem = Subscription & { days_left: number; urgency: 'overdue' | 'today' | 'soon' | 'upcoming' };
 
 export type User = { id: string; email: string; name: string; is_pro: boolean };

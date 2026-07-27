@@ -14,6 +14,8 @@ import { useAuth, monthlyEquivalent } from '@/src/auth-context';
 import { BrandAvatar, formatMoney } from '@/src/ui';
 import { api, Subscription } from '@/src/api';
 import { differenceInCalendarDays, parseISO, format } from 'date-fns';
+import { RemindersSection } from '@/src/reminders';
+import { getNotifPermission, requestNotifPermission, rescheduleReminders } from '@/src/notifications';
 
 const AnimatedText = Animated.createAnimatedComponent(Text);
 
@@ -74,10 +76,31 @@ function DonutChart({ data, total }: { data: { key: string; value: number }[]; t
 export default function Dashboard() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { user, subs, refreshSubs } = useAuth();
+  const { user, subs, refreshSubs, refreshReminders } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [scanResults, setScanResults] = useState<any[] | null>(null);
+  const [notifPromptShown, setNotifPromptShown] = useState(false);
+  const [notifState, setNotifState] = useState<'unknown' | 'granted' | 'denied' | 'blocked' | 'unsupported'>('unknown');
+
+  useEffect(() => {
+    (async () => {
+      const { state } = await getNotifPermission();
+      setNotifState(state === 'undetermined' ? 'unknown' : (state as any));
+      if (state === 'granted') {
+        rescheduleReminders(subs);
+      }
+    })();
+  }, [subs]);
+
+  const promptForNotifs = async () => {
+    setNotifPromptShown(true);
+    const r = await requestNotifPermission();
+    setNotifState(r === 'undetermined' ? 'unknown' : (r as any));
+    if (r === 'granted') {
+      await rescheduleReminders(subs);
+    }
+  };
 
   const activeSubs = subs.filter((s) => s.status === 'active');
   const monthly = useMemo(() => activeSubs.reduce((sum, s) => sum + monthlyEquivalent(s), 0), [activeSubs]);
@@ -97,7 +120,7 @@ export default function Dashboard() {
 
   const onRefresh = async () => {
     setRefreshing(true);
-    await refreshSubs();
+    await Promise.all([refreshSubs(), refreshReminders()]);
     setRefreshing(false);
   };
 
@@ -124,7 +147,7 @@ export default function Dashboard() {
         status: 'active',
       },
     });
-    await refreshSubs();
+    await Promise.all([refreshSubs(), refreshReminders()]);
     setScanResults((prev) => (prev || []).filter((x) => x.name !== item.name));
   };
 
@@ -173,6 +196,23 @@ export default function Dashboard() {
             </View>
           </Animated.View>
         </View>
+
+        {/* Reminders — appears above scan actions when there are any */}
+        <RemindersSection />
+
+        {/* Notification permission prompt (only after user has some reminders and hasn't granted yet) */}
+        {(notifState === 'unknown' || notifState === 'denied') && !notifPromptShown && (
+          <View style={hStyles.notifPrompt} testID="dashboard-notif-prompt">
+            <Ionicons name="notifications-outline" size={18} color={theme.color.brandSecondary} />
+            <View style={{ flex: 1 }}>
+              <Text style={hStyles.notifTitle}>Get renewal reminders on your phone</Text>
+              <Text style={hStyles.notifSub}>We'll ping you a few days before charges hit.</Text>
+            </View>
+            <Pressable onPress={promptForNotifs} style={hStyles.notifBtn} testID="dashboard-enable-notifs">
+              <Text style={hStyles.notifBtnText}>Enable</Text>
+            </Pressable>
+          </View>
+        )}
 
         {/* Actions */}
         <View style={hStyles.actionsRow}>
@@ -325,6 +365,15 @@ const hStyles = StyleSheet.create({
   },
   heroChipText: { color: theme.color.ink, fontSize: 12, fontWeight: '600' },
   dot: { width: 8, height: 8, borderRadius: 4 },
+  notifPrompt: {
+    marginTop: 12, marginHorizontal: 24, padding: 14, borderRadius: 20,
+    backgroundColor: theme.color.surfaceSecondary, borderWidth: 1, borderColor: theme.color.border,
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+  },
+  notifTitle: { color: theme.color.ink, fontSize: 13, fontWeight: '700' },
+  notifSub: { color: theme.color.inkSoft, fontSize: 11, marginTop: 2 },
+  notifBtn: { backgroundColor: theme.color.ink, paddingHorizontal: 14, paddingVertical: 8, borderRadius: theme.radius.pill },
+  notifBtnText: { color: '#FFFFFF', fontWeight: '700', fontSize: 12 },
   actionsRow: { flexDirection: 'row', paddingHorizontal: 24, gap: 12, marginTop: 8 },
   scanBtn: { flex: 1, borderRadius: 20, overflow: 'hidden' },
   scanInner: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 16, paddingHorizontal: 16 },
