@@ -5,7 +5,6 @@
   },
   "build": {
     "base": {
-      "//": "EAS builders default to Node 20, but @supabase/supabase-js requires >=22 and yarn refuses to install against an older engine. Shared here so every profile stays on the same runtime.",
       "node": "22.11.0",
       "env": {
         "EXPO_PUBLIC_SUPABASE_URL": "https://enygjgbohhpmgwrxclhl.supabase.co",
