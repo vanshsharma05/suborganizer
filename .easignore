@@ -2,6 +2,10 @@
 # included android/ (2.3 GB of local Gradle output) and node_modules (4.8 GB) —
 # both of which EAS throws away and regenerates on its own builders.
 #
+# Lives at the repo root, not frontend/: EAS archives from the git root (the
+# builder runs yarn in <archive>/frontend), so a copy inside frontend/ is never
+# read. Patterns have no leading slash, so they match at any depth.
+#
 # Note this file REPLACES .gitignore for EAS uploads rather than adding to it,
 # so anything that should stay out has to be listed here too.
 
