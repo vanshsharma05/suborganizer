@@ -5,7 +5,7 @@
   },
   "build": {
     "base": {
-      "node": "22.11.0",
+      "node": "24.15.0",
       "env": {
         "EXPO_PUBLIC_SUPABASE_URL": "https://enygjgbohhpmgwrxclhl.supabase.co",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVueWdqZ2JvaGhwbWd3cnhjbGhsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUxMzM4OTUsImV4cCI6MjEwMDcwOTg5NX0.YhppoGIlPz9ZoQusVnjtKiCE-K6Wwm7RcxHKKXqM1J4",
