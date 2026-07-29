@@ -45,6 +45,9 @@ not cover all three.
 | iOS | iOS | Bundle ID `com.suborganizer.app` |
 | Web | Web application | Redirect URI `http://localhost:8081/gmail-callback` |
 
+The Web client also has a **client secret**. It is needed — but it goes on the
+server, never in `.env`. See step 5.
+
 Debug SHA-1 for Android:
 
 ```bash
@@ -68,6 +71,28 @@ npx expo start -c        # -c so Expo re-inlines the new values
 Android needs the package-name URL scheme, already in `app.json`. It is a
 native change, so Expo Go will not pick it up — use `npx expo run:android`.
 
+Client **ids** are fine here — they are public by design. The client **secret**
+is not; it goes in step 5.
+
+## 5. Deploy the token exchange (web only)
+
+Skip this if you only build for Android and iOS — they never call it.
+
+```bash
+supabase functions deploy gmail-oauth
+
+supabase secrets set \
+  GOOGLE_WEB_CLIENT_ID=...apps.googleusercontent.com \
+  GOOGLE_WEB_CLIENT_SECRET=GOCSPX-... \
+  GMAIL_ALLOWED_REDIRECTS=http://localhost:8081/gmail-callback
+```
+
+`GMAIL_ALLOWED_REDIRECTS` is a comma-separated allowlist. Add your deployed web
+origin when you have one — a redirect that is not on the list is refused.
+
+The function requires a signed-in Supabase user, so it cannot be used as an
+open code-redemption endpoint by anyone who finds the URL.
+
 ---
 
 ## Limits
@@ -75,11 +100,16 @@ native change, so Expo Go will not pick it up — use `npx expo run:android`.
 - **`gmail.readonly` is a restricted scope.** Up to 100 hand-added test users
   work immediately; going public needs Google verification plus a paid CASA
   security assessment. No code changes when that lands.
-- **Web has no silent refresh.** Google only returns a refresh token to a web
-  client when the exchange includes a client secret, which cannot ship in a
-  bundle, so the grant lapses after an hour and the user reconnects. Native
-  clients refresh on the client id alone — which is why `src/gmail/auth.ts`
-  keeps its own grant rather than reusing Supabase's `provider_token`.
+- **Web redeems its code through an Edge Function, not directly.** A Google
+  *Web application* client is a confidential client: it requires `client_secret`
+  at the token endpoint even alongside PKCE. Without it Google answers
+  `client_secret is missing` and the connect fails outright. The secret cannot
+  ship in the bundle, so `supabase/functions/gmail-oauth` holds it and redeems
+  on the app's behalf (step 5). Android and iOS clients are *public* clients —
+  they exchange and refresh on the client id alone and never call the function.
+
+  Never put the secret in an `EXPO_PUBLIC_*` var. Everything with that prefix is
+  inlined into the JS bundle, which any visitor can download.
 
 ---
 
@@ -87,6 +117,14 @@ native change, so Expo Go will not pick it up — use `npx expo run:android`.
 
 Regex and lookup tables, not an LLM: offline, free per scan, and every verdict
 traces back to the exact email and phrase — which the expandable card shows.
+
+Bank and credit-card mail is dropped before classification. A card bill arrives
+monthly, states an amount and says "payment received", so it is otherwise
+indistinguishable from a subscription charge. Two filters handle it: a list of
+issuer domains, and `isBankingNoise()` for wording no subscription would use —
+"total amount due", "credit limit", "payment received towards", "EMI". Senders
+in the merchant catalog are exempt, so a real subscription is never dropped on
+wording alone.
 
 A merchant's emails are replayed oldest-first:
 

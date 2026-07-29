@@ -10,8 +10,8 @@
 SubOrganizer ("the app", "we") helps you track recurring subscriptions. This
 policy explains what we collect, why, and what we never do.
 
-**Contact:** [your support email]
-**Published by:** [your name or company]
+**Contact:** taskteamprosupport@gmail.com
+**Published by:** SubOrganizer
 
 ---
 
@@ -78,13 +78,13 @@ Gmail) — and only as required to operate the app, or where the law compels us.
 ## How long we keep it
 
 Your data is kept while your account exists. Delete your account and the
-associated data is removed. To request deletion, email [your support email].
+associated data is removed. To request deletion, email taskteamprosupport@gmail.com.
 
 ## Your rights
 
 You can access, correct, export or delete your data. Every subscription can be
 edited or deleted in the app. For account deletion or a copy of your data,
-contact us at [your support email].
+contact us at taskteamprosupport@gmail.com.
 
 ## Notifications
 
@@ -103,4 +103,4 @@ in the app.
 
 ## Contact
 
-Questions about this policy or your data: [your support email]
+Questions about this policy or your data: taskteamprosupport@gmail.com
