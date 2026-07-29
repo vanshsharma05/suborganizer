@@ -10,6 +10,16 @@ import { BrandAvatar, Chip, formatMoney } from '@/src/ui';
 import { fmtMoney } from '@/src/currency';
 import { parseISO, differenceInCalendarDays, format } from 'date-fns';
 
+/**
+ * Written out rather than sliced to two characters — that trick only reads
+ * correctly for "monthly", and turned yearly plans into "/ye".
+ */
+const CYCLE_SHORT: Record<string, string> = {
+  weekly: 'wk',
+  monthly: 'mo',
+  yearly: 'yr',
+};
+
 export default function SubscriptionsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -94,7 +104,7 @@ export default function SubscriptionsScreen() {
                 </View>
                 <View style={{ alignItems: 'flex-end' }}>
                   <Text style={styles.amount}>{formatMoney(item.amount, item.currency)}</Text>
-                  <Text style={styles.cycle}>/{item.billing_cycle.slice(0, 2)}</Text>
+                  <Text style={styles.cycle}>/{CYCLE_SHORT[item.billing_cycle] ?? item.billing_cycle}</Text>
                   {item.billing_cycle !== 'monthly' && (
                     <Text style={styles.monthly}>{fmtMoney(monthly, item.currency)}/mo</Text>
                   )}

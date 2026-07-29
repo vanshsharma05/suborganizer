@@ -6,7 +6,7 @@ import Animated, { FadeInDown } from 'react-native-reanimated';
 import { theme } from '@/src/theme';
 import { useAuth } from '@/src/auth-context';
 import { BrandAvatar, formatMoney, formatMoneyRounded } from '@/src/ui';
-import { convertToPrimary, monthlyEquivalent as monthlyEq } from '@/src/currency';
+import { convertToPrimary, monthlyEquivalent as monthlyEq, useExchangeRate } from '@/src/currency';
 import { parseISO, differenceInCalendarDays, format, isSameDay, isToday } from 'date-fns';
 
 export default function CalendarScreen() {
@@ -15,6 +15,8 @@ export default function CalendarScreen() {
   const { subs, refreshSubs, user } = useAuth();
   const [refreshing, setRefreshing] = useState(false);
   const primary = (user?.primary_currency || 'INR').toUpperCase();
+  // In the deps below so totals recompute when the live USD rate arrives.
+  const rate = useExchangeRate();
 
   const timeline = useMemo(() => {
     return subs
@@ -31,7 +33,7 @@ export default function CalendarScreen() {
         return d >= 0 && d <= 7;
       })
       .reduce((acc, s) => acc + convertToPrimary(s.amount, s.currency, primary), 0);
-  }, [timeline, primary]);
+  }, [timeline, primary, rate]);
 
   const total30 = useMemo(() => {
     const now = new Date();
@@ -41,7 +43,7 @@ export default function CalendarScreen() {
         return d >= 0 && d <= 30;
       })
       .reduce((acc, s) => acc + convertToPrimary(s.amount, s.currency, primary), 0);
-  }, [timeline, primary]);
+  }, [timeline, primary, rate]);
 
   const onRefresh = async () => { setRefreshing(true); await refreshSubs(); setRefreshing(false); };
 

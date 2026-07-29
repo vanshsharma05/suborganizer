@@ -9,7 +9,7 @@ import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { theme, IMAGES, CATEGORY_COLORS } from '@/src/theme';
 import { useAuth, monthlyEquivalent } from '@/src/auth-context';
 import { formatMoney, formatMoneyRounded } from '@/src/ui';
-import { convertToPrimary } from '@/src/currency';
+import { convertToPrimary, useExchangeRate } from '@/src/currency';
 import { upgradeToPro } from '@/src/api';
 
 export default function InsightsScreen() {
@@ -19,6 +19,8 @@ export default function InsightsScreen() {
   const [upgrading, setUpgrading] = useState(false);
 
   const isPro = user?.is_pro ?? false;
+  // In the deps below so totals recompute when the live USD rate arrives.
+  const rate = useExchangeRate();
 
   // The old backend computed this in GET /insights. With the whole list already
   // in context there is nothing to fetch — deriving it keeps the numbers in
@@ -75,7 +77,7 @@ export default function InsightsScreen() {
       pro_savings_tip: savings_tip,
       pro_unused_alert: unused_alert,
     };
-  }, [subs, user?.primary_currency]);
+  }, [subs, user?.primary_currency, rate]);
 
   const onRefresh = async () => {
     setRefreshing(true);

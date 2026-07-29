@@ -12,7 +12,7 @@ import Svg, { Circle, G } from 'react-native-svg';
 import { theme, IMAGES, CATEGORY_COLORS } from '@/src/theme';
 import { useAuth, monthlyEquivalent } from '@/src/auth-context';
 import { BrandAvatar, formatMoney, formatMoneyRounded } from '@/src/ui';
-import { convertToPrimary, fmtMoney } from '@/src/currency';
+import { convertToPrimary, fmtMoney, useExchangeRate } from '@/src/currency';
 import { Subscription } from '@/src/api';
 import { differenceInCalendarDays, parseISO, format } from 'date-fns';
 import { RemindersSection } from '@/src/reminders';
@@ -109,10 +109,12 @@ export default function Dashboard() {
 
   const activeSubs = subs.filter((s) => s.status === 'active');
   const primaryCurrency = (user?.primary_currency || 'INR').toUpperCase();
+  // In the deps below so totals recompute when the live USD rate arrives.
+  const rate = useExchangeRate();
 
   const monthly = useMemo(
     () => activeSubs.reduce((sum, s) => sum + convertToPrimary(monthlyEquivalent(s), s.currency, primaryCurrency), 0),
-    [activeSubs, primaryCurrency],
+    [activeSubs, primaryCurrency, rate],
   );
   const yearly = monthly * 12;
 
@@ -123,7 +125,7 @@ export default function Dashboard() {
       m[s.category] = (m[s.category] || 0) + v;
     });
     return Object.entries(m).map(([key, value]) => ({ key, value })).sort((a, b) => b.value - a.value);
-  }, [activeSubs, primaryCurrency]);
+  }, [activeSubs, primaryCurrency, rate]);
 
   const upcoming = useMemo(() => {
     return [...activeSubs]
