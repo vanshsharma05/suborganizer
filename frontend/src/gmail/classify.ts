@@ -348,9 +348,21 @@ export function isAggregator(sender: Sender): boolean {
 const IGNORED_DOMAINS = [
   'gmail.com', 'googlemail.com', 'yahoo.com', 'outlook.com', 'hotmail.com',
   'live.com', 'icloud.com', 'proton.me', 'protonmail.com', 'rediffmail.com',
+  // Banks and card issuers. Not exhaustive by design — isBankingNoise() is what
+  // catches the ones that will never make a list this long.
   'hdfcbank.com', 'hdfcbank.net', 'icicibank.com', 'axisbank.com', 'sbi.co.in',
-  'kotak.com', 'yesbank.in', 'idfcfirstbank.com', 'americanexpress.com',
-  'onecard.app', 'cred.club', 'jupiter.money', 'slicepay.in',
+  'sbicard.com', 'kotak.com', 'yesbank.in', 'idfcfirstbank.com', 'rblbank.com',
+  'indusind.com', 'federalbank.co.in', 'bankofbaroda.in', 'pnbindia.in',
+  'canarabank.com', 'unionbankofindia.co.in', 'aubank.in', 'bandhanbank.com',
+  'idbibank.in', 'bankofindia.co.in', 'indianbank.in',
+  'americanexpress.com', 'aexp.com', 'citibank.com', 'citi.com', 'sc.com',
+  'hsbc.co.in', 'dbs.com', 'standardchartered.com',
+  'chase.com', 'bankofamerica.com', 'wellsfargo.com', 'capitalone.com',
+  'discover.com', 'barclays.co.uk', 'revolut.com', 'monzo.com',
+  // Card and payment apps
+  'onecard.app', 'cred.club', 'jupiter.money', 'slicepay.in', 'uni.club',
+  'fi.money', 'paytm.com', 'phonepe.com', 'mobikwik.com', 'freecharge.com',
+  'billdesk.com', 'payu.in',
   'linkedin.com', 'naukri.com', 'indeed.com', 'glassdoor.com',
   'facebook.com', 'facebookmail.com', 'instagram.com', 'x.com', 'twitter.com',
   'quora.com', 'pinterest.com', 'reddit.com', 'whatsapp.com',
@@ -368,19 +380,72 @@ export function isIgnoredSender(sender: Sender, hasCatalogEntry: boolean): boole
   return IGNORED_DOMAINS.includes(sender.domain);
 }
 
+/**
+ * Wording that marks a mail as bank or card business rather than a
+ * subscription.
+ *
+ * A credit-card bill is the worst offender the scan meets: it arrives monthly,
+ * carries an amount, and says "payment received" — indistinguishable from a
+ * subscription charge on those signals alone. There are far too many issuers to
+ * keep listing domains, so the giveaway has to be the wording.
+ *
+ * Every pattern here is something a subscription receipt would never say.
+ * "Card ending in 4242" is deliberately absent — Netflix writes that too.
+ */
+const BANKING_NOISE: RegExp[] = [
+  // The bill itself
+  /\bcredit\s+card\s+(?:bill|statement|payment|account|dues?)\b/i,
+  /\b(?:card|account)\s+statement\b/i,
+  /\bstatement\s+of\s+account\b/i,
+  /\b(?:total|minimum|min\.?)\s+amount\s+due\b/i,
+  /\bunbilled\s+(?:amount|transactions?)\b/i,
+
+  // Balances and limits — a subscription has neither
+  /\b(?:credit|available)\s+limit\b/i,
+  /\boutstanding\s+(?:amount|balance|dues?)\b/i,
+
+  // Paying the bank rather than a merchant. Only "towards" counts — it is
+  // banking phrasing almost to the exclusion of anything else, whereas
+  // "payment received for your …" is how half of all receipts open.
+  /\bpayment\s+(?:received|credited)\s+towards?\b/i,
+  /\btowards?\s+your\s+(?:credit\s+)?card\b/i,
+  /\bbill\s+payment\s+(?:successful|received|confirmation)\b/i,
+
+  // Lending
+  /\bEMI\b/,
+  /\b(?:personal|home|car|auto|education|gold)\s+loan\b/i,
+  /\bloan\s+(?:emi|instal?ment|repayment|account)\b/i,
+
+  // Transfer rails and loyalty, written uppercase in bank mail
+  /\b(?:NEFT|IMPS|RTGS|NACH)\b/,
+  /\breward\s+points\b/i,
+];
+
+/**
+ * True when the mail is bank or card business. Callers should exempt senders
+ * that are in the merchant catalog: a known subscription brand saying something
+ * unusual should not be thrown away on wording alone.
+ */
+export function isBankingNoise(text: string): boolean {
+  return BANKING_NOISE.some((re) => re.test(text));
+}
+
 // ------------------------------------------------------------------ amounts --
 
 const SYMBOL_TO_CODE: Record<string, string> = {
   '₹': 'INR', 'rs': 'INR', 'rs.': 'INR', 'inr': 'INR',
   '$': 'USD', 'us$': 'USD', 'usd': 'USD',
-  '€': 'EUR', 'eur': 'EUR',
-  '£': 'GBP', 'gbp': 'GBP',
-  '¥': 'JPY', 'jpy': 'JPY',
-  'aed': 'AED', 'cad': 'CAD', 'aud': 'AUD', 'sgd': 'SGD',
 };
 
+/**
+ * INR and USD only — the two currencies the app supports.
+ *
+ * A euro or yen figure is skipped rather than captured, so an amount is never
+ * stored under a currency the totals cannot convert. The candidate still
+ * surfaces for review; it just arrives without a price.
+ */
 const AMOUNT_RE =
-  /(₹|Rs\.?|INR|US\$|\$|USD|€|EUR|£|GBP|¥|JPY|AED|CAD|AUD|SGD)\s?(\d[\d,]*(?:\.\d{1,2})?)|(\d[\d,]*(?:\.\d{1,2})?)\s?(INR|USD|EUR|GBP|JPY|AED|CAD|AUD|SGD)\b/gi;
+  /(₹|Rs\.?|INR|US\$|\$|USD)\s?(\d[\d,]*(?:\.\d{1,2})?)|(\d[\d,]*(?:\.\d{1,2})?)\s?(INR|USD)\b/gi;
 
 /**
  * Discount wording has to be *adjacent* to the number to disqualify it, not

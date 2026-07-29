@@ -15,6 +15,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as AuthSession from 'expo-auth-session';
 import Constants from 'expo-constants';
+import * as WebBrowser from 'expo-web-browser';
 import { Platform } from 'react-native';
 import { supabase } from '../supabase';
 
@@ -57,13 +58,31 @@ export class GmailAuthError extends Error {
 
 // ------------------------------------------------------------------ config --
 
+/**
+ * Expo Go cannot own `com.suborganizer.app://`, and no Google client type will
+ * redirect to an `exp://` URL — Android clients take only the package scheme,
+ * web clients only http(s). So Expo Go goes the long way round: Google returns
+ * to an https page we control, which forwards to the `exp://` deep link Expo Go
+ * does handle. See docs/gmail-callback.html.
+ *
+ * Because that redirect is https, Expo Go must also use the *web* client id,
+ * and therefore the Edge Function for the exchange. Real builds own their
+ * scheme and skip all of this.
+ */
+const inExpoGo = Constants.executionEnvironment === 'storeClient';
+
+/** The bounce page, published from docs/ via GitHub Pages. */
+const BOUNCE_URL =
+  process.env.EXPO_PUBLIC_GMAIL_BOUNCE_URL ??
+  'https://vanshsharma05.github.io/suborganizer/gmail-callback.html';
+
 function clientId(): string {
   const id =
-    Platform.OS === 'ios'
-      ? process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID
-      : Platform.OS === 'android'
-        ? process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID
-        : process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID;
+    inExpoGo || Platform.OS === 'web'
+      ? process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID
+      : Platform.OS === 'ios'
+        ? process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID
+        : process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID;
 
   if (!id) {
     throw new GmailAuthError(
@@ -74,14 +93,23 @@ function clientId(): string {
   return id;
 }
 
-/** True when this platform has a client id, so the UI can hide the feature. */
-export function isGmailConfigured(): boolean {
+/**
+ * Why Gmail scanning cannot run here, or null when it can. The UI shows this
+ * instead of the Connect button so the user never reaches a flow that is
+ * guaranteed to fail.
+ */
+export function gmailUnavailableReason(): string | null {
   try {
     clientId();
-    return true;
-  } catch {
-    return false;
+    return null;
+  } catch (e) {
+    return e instanceof Error ? e.message : 'Gmail scanning is unavailable.';
   }
+}
+
+/** True when this platform can actually complete the flow. */
+export function isGmailConfigured(): boolean {
+  return gmailUnavailableReason() === null;
 }
 
 /**
@@ -90,6 +118,8 @@ export function isGmailConfigured(): boolean {
  * package name it was registered with, web only an https origin.
  */
 function redirectUri(id: string): string {
+  if (inExpoGo) return BOUNCE_URL;
+
   if (Platform.OS === 'web') return AuthSession.makeRedirectUri({ path: 'gmail-callback' });
 
   if (Platform.OS === 'ios') {
@@ -102,6 +132,49 @@ function redirectUri(id: string): string {
   // or the user lands on "Unmatched Route" while the exchange finishes.
   const pkg = Constants.expoConfig?.android?.package ?? 'com.suborganizer.app';
   return `${pkg}:/gmail-callback`;
+}
+
+// --------------------------------------------------------------- web proxy --
+
+/**
+ * The web build cannot redeem its own authorization code. Google's "Web
+ * application" client is a *confidential* client: the token endpoint demands
+ * `client_secret` even alongside PKCE, and a secret must never ship in a bundle
+ * anyone can download. `supabase/functions/gmail-oauth` holds the secret and
+ * redeems on the app's behalf.
+ *
+ * Native clients are public clients — they exchange and refresh on the client
+ * id alone — so they talk to Google directly and skip this entirely.
+ */
+const usesProxy = Platform.OS === 'web' || inExpoGo;
+
+type ProxyTokens = {
+  access_token: string;
+  refresh_token?: string;
+  expires_in?: number;
+  scope?: string;
+};
+
+async function callProxy(body: Record<string, unknown>): Promise<ProxyTokens> {
+  // invoke() attaches the signed-in user's JWT, which the function requires.
+  const { data, error } = await supabase.functions.invoke<ProxyTokens>('gmail-oauth', { body });
+
+  if (error) {
+    // supabase-js wraps a non-2xx as FunctionsHttpError and leaves the response
+    // on .context — which is where the function's error_description lives.
+    let detail = error.message;
+    const ctx = (error as { context?: Response }).context;
+    if (ctx && typeof ctx.json === 'function') {
+      const payload = await ctx.json().catch(() => null);
+      if (payload?.error_description) detail = payload.error_description as string;
+    }
+    throw new GmailAuthError(detail);
+  }
+
+  if (!data?.access_token) {
+    throw new GmailAuthError('The Gmail token service returned no access token.');
+  }
+  return data;
 }
 
 // ------------------------------------------------------------------- store --
@@ -160,12 +233,17 @@ export async function connectGmail(): Promise<GmailConnection> {
   const id = clientId();
   const redirect = redirectUri(id);
 
+  // Where the bounce page should send the user once Google is done. Carried in
+  // `state`, which Google echoes back to the page unchanged.
+  const expReturn = inExpoGo ? `exp://${Constants.expoConfig?.hostUri ?? ''}/--/gmail-callback` : '';
+
   const request = new AuthSession.AuthRequest({
     clientId: id,
     scopes: GMAIL_SCOPES,
     redirectUri: redirect,
     responseType: AuthSession.ResponseType.Code,
     usePKCE: true,
+    ...(inExpoGo ? { state: expReturn } : {}),
     extraParams: {
       // Without both of these Google returns an access token only, and the user
       // would have to re-consent for every scan once the hour is up.
@@ -174,26 +252,59 @@ export async function connectGmail(): Promise<GmailConnection> {
     },
   });
 
-  const result = await request.promptAsync(DISCOVERY);
-  if (result.type === 'dismiss' || result.type === 'cancel') {
-    throw new GmailAuthError('Gmail connection cancelled');
-  }
-  if (result.type !== 'success') {
-    throw new GmailAuthError(
-      (result as { params?: Record<string, string> }).params?.error_description ??
-        'Google did not return an authorization code',
-    );
+  let code: string;
+
+  if (inExpoGo) {
+    // promptAsync() would sit waiting for a return to BOUNCE_URL, but the
+    // browser carries on to the exp:// link instead — so the session is driven
+    // by hand, watching for the deep link rather than the https redirect.
+    const authUrl = await request.makeAuthUrlAsync(DISCOVERY);
+    const browser = await WebBrowser.openAuthSessionAsync(authUrl, expReturn);
+
+    if (browser.type !== 'success') throw new GmailAuthError('Gmail connection cancelled');
+
+    const params = new URL(browser.url).searchParams;
+    const failure = params.get('error');
+    if (failure) throw new GmailAuthError(params.get('error_description') ?? failure);
+
+    const returned = params.get('code');
+    if (!returned) throw new GmailAuthError('Google did not return an authorization code');
+    code = returned;
+  } else {
+    const result = await request.promptAsync(DISCOVERY);
+    if (result.type === 'dismiss' || result.type === 'cancel') {
+      throw new GmailAuthError('Gmail connection cancelled');
+    }
+    if (result.type !== 'success') {
+      throw new GmailAuthError(
+        (result as { params?: Record<string, string> }).params?.error_description ??
+          'Google did not return an authorization code',
+      );
+    }
+    code = result.params.code;
   }
 
-  const token = await AuthSession.exchangeCodeAsync(
-    {
-      clientId: id,
-      code: result.params.code,
-      redirectUri: redirect,
-      extraParams: { code_verifier: request.codeVerifier ?? '' },
-    },
-    DISCOVERY,
-  );
+  const token = usesProxy
+    ? await callProxy({
+        action: 'exchange',
+        code,
+        codeVerifier: request.codeVerifier ?? '',
+        redirectUri: redirect,
+      }).then((t) => ({
+        accessToken: t.access_token,
+        refreshToken: t.refresh_token,
+        expiresIn: t.expires_in,
+        scope: t.scope,
+      }))
+    : await AuthSession.exchangeCodeAsync(
+        {
+          clientId: id,
+          code,
+          redirectUri: redirect,
+          extraParams: { code_verifier: request.codeVerifier ?? '' },
+        },
+        DISCOVERY,
+      );
 
   const granted = token.scope ?? '';
   if (granted && !granted.includes('gmail.readonly')) {
@@ -227,17 +338,23 @@ export async function getGmailAccessToken(): Promise<string | null> {
   if (conn.expiresAt - EXPIRY_SKEW_MS > Date.now()) return conn.accessToken;
 
   if (!conn.refreshToken) {
-    // Web OAuth clients only get a refresh token when the exchange includes a
-    // client secret, which we cannot ship — so on web the grant simply lapses.
+    // Google withholds the refresh token when consent was already granted and
+    // the request did not force it. Reconnecting (prompt=consent) fixes it.
     await disconnectGmail();
     throw new GmailAuthError('Gmail access expired. Connect again to scan.');
   }
 
   try {
-    const refreshed = await AuthSession.refreshAsync(
-      { clientId: clientId(), refreshToken: conn.refreshToken, scopes: GMAIL_SCOPES },
-      DISCOVERY,
-    );
+    const refreshed = usesProxy
+      ? await callProxy({ action: 'refresh', refreshToken: conn.refreshToken }).then((t) => ({
+          accessToken: t.access_token,
+          refreshToken: t.refresh_token,
+          expiresIn: t.expires_in,
+        }))
+      : await AuthSession.refreshAsync(
+          { clientId: clientId(), refreshToken: conn.refreshToken, scopes: GMAIL_SCOPES },
+          DISCOVERY,
+        );
 
     const next: GmailConnection = {
       ...conn,

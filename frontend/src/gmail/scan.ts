@@ -26,6 +26,7 @@ import {
   extractMoney,
   guessCategory,
   isAggregator,
+  isBankingNoise,
   isIgnoredSender,
   isPaymentProcessor,
   lookupMerchant,
@@ -249,6 +250,11 @@ function collectEvent(msg: GmailHeaders, groups: Map<string, GroupDraft>): void 
   if (isIgnoredSender(sender, Boolean(merchant))) return;
 
   const haystack = `${msg.subject} ${msg.snippet}`;
+
+  // A credit-card bill recurs monthly, states an amount and says "payment
+  // received", so it reads as a subscription charge on wording alone. Known
+  // subscription brands are exempt — this only filters unrecognised senders.
+  if (!merchant && isBankingNoise(haystack)) return;
 
   // Noisy senders only count when the mail is about the thing they bill for.
   if (merchant?.requires && !merchant.requires.test(haystack)) return;

@@ -26,7 +26,7 @@ import {
   getGmailConnection,
   GmailAuthError,
   GmailConnection,
-  isGmailConfigured,
+  gmailUnavailableReason,
   ScanCancelled,
   ScanDepth,
   scanGmail,
@@ -65,7 +65,8 @@ export default function ScanScreen() {
   const router = useRouter();
   const { subs, refreshSubs } = useAuth();
 
-  const configured = useMemo(() => isGmailConfigured(), []);
+  const unavailable = useMemo(() => gmailUnavailableReason(), []);
+  const configured = unavailable === null;
   const [connection, setConnection] = useState<GmailConnection | null>(null);
   const [phase, setPhase] = useState<Phase>('idle');
   const [depth, setDepth] = useState<ScanDepth>('quick');
@@ -242,7 +243,7 @@ export default function ScanScreen() {
           </Animated.View>
         )}
 
-        {!configured && <NotConfigured />}
+        {!configured && <NotConfigured reason={unavailable} />}
 
         {configured && !connection && phase !== 'connecting' && (
           <ConnectCard onConnect={connect} />
@@ -394,14 +395,13 @@ export default function ScanScreen() {
 
 // ------------------------------------------------------------------ pieces --
 
-function NotConfigured() {
+function NotConfigured({ reason }: { reason: string | null }) {
   return (
     <View style={s.card} testID="scan-not-configured">
       <Ionicons name="construct-outline" size={24} color={theme.color.brandSecondary} />
       <Text style={s.cardTitle}>Gmail scanning needs setup</Text>
       <Text style={s.cardText}>
-        Add a Google OAuth client id for this platform to frontend/.env, then restart Expo. The
-        steps are in docs/gmail-setup.md.
+        {reason ?? 'Gmail scanning cannot run here.'}
       </Text>
     </View>
   );

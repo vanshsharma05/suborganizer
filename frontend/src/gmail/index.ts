@@ -3,6 +3,7 @@ export {
   disconnectGmail,
   getGmailConnection,
   GmailAuthError,
+  gmailUnavailableReason,
   isGmailConfigured,
   type GmailConnection,
 } from './auth';
