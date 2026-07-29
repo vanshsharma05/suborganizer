@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Delete your account — SubOrganizer</title>
+<meta name="description" content="How to delete your SubOrganizer account and the data held with it.">
+<style>
+  :root {
+    --surface: #FDFBF7; --surface-2: #F4EFE6; --ink: #1A1C1E; --ink-soft: #4A4C4A;
+    --ink-muted: #8A867F; --brand-deep: #D36043; --teal: #0D9488; --border: #EAE4D9;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--surface); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    line-height: 1.7; -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 0 24px; }
+  header { border-bottom: 1px solid var(--border); padding: 44px 0 28px; }
+  h1 { font-size: clamp(26px, 5vw, 34px); letter-spacing: -0.8px; margin: 0 0 6px; font-weight: 800; }
+  .updated { color: var(--ink-muted); font-size: 14px; margin: 0; }
+  main { padding: 12px 0 64px; }
+  h2 { font-size: 19px; letter-spacing: -0.4px; margin: 38px 0 12px; font-weight: 700; }
+  p, li { color: var(--ink-soft); }
+  p { margin: 0 0 14px; }
+  ul, ol { padding-left: 22px; margin: 0 0 14px; }
+  li { margin-bottom: 8px; }
+  strong { color: var(--ink); }
+  .note {
+    background: var(--surface-2); border-left: 3px solid var(--teal);
+    border-radius: 0 14px 14px 0; padding: 18px 20px; margin: 22px 0;
+  }
+  .note p:last-child { margin-bottom: 0; }
+  table { border-collapse: collapse; width: 100%; margin: 0 0 18px; font-size: 15px; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); color: var(--ink-soft); }
+  th { color: var(--ink); font-weight: 700; }
+  a { color: var(--brand-deep); font-weight: 600; }
+  footer {
+    border-top: 1px solid var(--border); padding: 28px 0 48px;
+    font-size: 14px; color: var(--ink-muted); text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<header class="wrap">
+  <h1>Delete your account</h1>
+  <p class="updated">SubOrganizer · Last updated 29 July 2026</p>
+</header>
+
+<main class="wrap">
+  <p>
+    This page explains how to delete your <strong>SubOrganizer</strong> account
+    and everything stored with it.
+  </p>
+
+  <h2>How to request deletion</h2>
+  <ol>
+    <li>
+      Email <a href="mailto:taskteamprosupport@gmail.com">taskteamprosupport@gmail.com</a>
+      <strong>from the address you signed up with</strong>. Sending from that
+      address is how we confirm the account is yours.
+    </li>
+    <li>Use the subject line <strong>Delete my account</strong>.</li>
+    <li>You do not need to give a reason, and we will not ask for one.</li>
+  </ol>
+  <p>
+    We action requests within <strong>30 days</strong>, and in practice within
+    a few days. We email you to confirm once it is done.
+  </p>
+
+  <h2>What gets deleted</h2>
+  <table>
+    <tr><th>Data</th><th>What happens</th></tr>
+    <tr><td>Your account and sign-in details</td><td>Deleted</td></tr>
+    <tr><td>Name and email address</td><td>Deleted</td></tr>
+    <tr><td>Every subscription you added, with amounts, cycles and notes</td><td>Deleted</td></tr>
+    <tr><td>Reminder settings</td><td>Deleted</td></tr>
+    <tr><td>Your Gmail connection, if you used Gmail scanning</td><td>Revoked and deleted</td></tr>
+  </table>
+
+  <div class="note">
+    <p>
+      <strong>Nothing is kept.</strong> We hold no backups of your subscription
+      data beyond routine database snapshots, which roll off within
+      <strong>30 days</strong>. After that no copy of your account remains.
+    </p>
+  </div>
+
+  <h2>Deleting some data without deleting your account</h2>
+  <p>You do not have to close your account to remove data:</p>
+  <ul>
+    <li><strong>A single subscription</strong> — open it and tap Delete. It is removed immediately.</li>
+    <li><strong>Your Gmail connection</strong> — Scan Gmail screen, then Disconnect. The grant is revoked with Google and the stored token is deleted.</li>
+  </ul>
+
+  <div class="note">
+    <p>
+      SubOrganizer never uploads or stores the contents of your emails. Gmail
+      scanning reads billing mail on your device, and only the subscription
+      details you approve are saved. See the
+      <a href="./privacy.html">privacy policy</a> for the full picture.
+    </p>
+  </div>
+
+  <h2>Questions</h2>
+  <p>
+    <a href="mailto:taskteamprosupport@gmail.com">taskteamprosupport@gmail.com</a>
+  </p>
+</main>
+
+<footer class="wrap">
+  <a href="./privacy.html">Privacy Policy</a> ·
+  <a href="mailto:taskteamprosupport@gmail.com">Contact</a>
+  <p style="margin-top:14px">&copy; 2026 SubOrganizer</p>
+</footer>
+
+</body>
+</html>
