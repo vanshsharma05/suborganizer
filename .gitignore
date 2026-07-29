@@ -86,3 +86,9 @@ android-sdk/
 credentials.json
 *.key
 .credentials
+
+# Downloaded EAS build artifacts
+release/
+
+# Supabase CLI local state
+supabase/.temp/

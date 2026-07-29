@@ -23,7 +23,7 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "com.suborganizer.app",
-      "versionCode": 5,
+      "versionCode": 6,
       "blockedPermissions": [
         "android.permission.SYSTEM_ALERT_WINDOW",
         "android.permission.READ_EXTERNAL_STORAGE",
@@ -54,8 +54,9 @@
     "extra": {
       "router": {},
       "eas": {
-        "projectId": "8647a41d-f964-4f18-a27d-38b900fb8360"
+        "projectId": "9ded5180-6101-46d7-bded-006bedec8ca5"
       }
-    }
+    },
+    "owner": "taskteampro"
   }
 }
