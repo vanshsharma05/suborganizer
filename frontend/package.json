@@ -6,7 +6,9 @@
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@expo/vector-icons": "15.1.1",
@@ -44,7 +46,8 @@
     "eslint": "9.25.0",
     "eslint-config-expo": "10.0.0",
     "expo-doctor": "1.19.8",
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
   },
   "resolutions": {
     "@eslint/plugin-kit": "0.3.4",

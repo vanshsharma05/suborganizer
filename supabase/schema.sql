@@ -56,8 +56,18 @@ create table if not exists public.subscriptions (
                          check (status in ('active', 'paused', 'cancelled')),
   reminder_days_before integer       not null default 3 check (reminder_days_before >= 0),
   snoozed_until        date,
+  -- A free trial. `is_trial` records that it *started* as one; whether the user
+  -- is still inside it is derived from trial_ends against today, so a trial
+  -- converts on its own without anything server-side having to run.
+  is_trial             boolean       not null default false,
+  trial_ends           date,
   created_at           timestamptz   not null default now()
 );
+
+-- Added after the first release, so existing tables need them too.
+alter table public.subscriptions
+  add column if not exists is_trial   boolean not null default false,
+  add column if not exists trial_ends date;
 
 -- The app's hottest read is "my subs, soonest renewal first" (dashboard,
 -- calendar, reminders all sort by it), so index the pair.
@@ -86,6 +96,68 @@ create policy "subs: update own"
 create policy "subs: delete own"
   on public.subscriptions for delete
   using (auth.uid() = user_id);
+
+
+-- ----------------------------------------------------------- price changes --
+-- Every amount change, so the app can say "Netflix went from ₹649 to ₹799 —
+-- that is ₹1,800 a year" instead of silently showing the new figure.
+--
+-- Written by a trigger rather than by the app: the amount is edited from the
+-- form, from the Gmail scan's reconcile step, and potentially from anywhere
+-- else later. A trigger cannot be forgotten by a caller.
+
+create table if not exists public.price_changes (
+  id              uuid          primary key default gen_random_uuid(),
+  subscription_id uuid          not null references public.subscriptions(id) on delete cascade,
+  user_id         uuid          not null references auth.users(id) on delete cascade,
+  old_amount      numeric(12,2) not null,
+  new_amount      numeric(12,2) not null,
+  currency        text          not null,
+  changed_at      timestamptz   not null default now()
+);
+
+create index if not exists price_changes_sub_idx
+  on public.price_changes (subscription_id, changed_at desc);
+
+alter table public.price_changes enable row level security;
+
+drop policy if exists "price_changes: read own"   on public.price_changes;
+drop policy if exists "price_changes: delete own" on public.price_changes;
+
+create policy "price_changes: read own"
+  on public.price_changes for select
+  using (auth.uid() = user_id);
+
+-- Users may clear their own history; there is deliberately no insert or update
+-- policy, so the only thing that can write a row is the trigger below.
+create policy "price_changes: delete own"
+  on public.price_changes for delete
+  using (auth.uid() = user_id);
+
+create or replace function public.log_price_change()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  -- `is distinct from` rather than <> so a null on either side still compares.
+  if new.amount is distinct from old.amount then
+    insert into public.price_changes
+      (subscription_id, user_id, old_amount, new_amount, currency)
+    values
+      (new.id, new.user_id, old.amount, new.amount, new.currency);
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists subscriptions_log_price_change on public.subscriptions;
+
+create trigger subscriptions_log_price_change
+  after update of amount on public.subscriptions
+  for each row execute function public.log_price_change();
 
 
 -- ------------------------------------------- create a profile on every signup --

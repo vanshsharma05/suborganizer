@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, TextInput, ScrollView, Pressable, KeyboardAvoidingView, Platform, ActivityIndicator,
 } from 'react-native';
@@ -17,12 +17,19 @@ import { GradientButton, Chip } from '@/src/ui';
 import { CURRENCIES, symbolFor } from '@/src/currency';
 import { format } from 'date-fns';
 
+/** `YYYY-MM-DD`, `n` days from `from`, in local time. */
+function addDays(from: Date, n: number): string {
+  const d = new Date(from);
+  d.setDate(d.getDate() + n);
+  return d.toISOString().split('T')[0];
+}
+
 export default function SubscriptionForm() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const isNew = !id || id === 'new';
-  const { subs, refreshSubs, refreshReminders } = useAuth();
+  const { subs, refreshSubs } = useAuth();
 
   const existing = !isNew ? subs.find((s) => s.id === id) : undefined;
 
@@ -39,8 +46,33 @@ export default function SubscriptionForm() {
     const d = new Date(); d.setDate(d.getDate() + 30);
     return d.toISOString().split('T')[0];
   });
+  const [isTrial, setIsTrial] = useState<boolean>(existing?.is_trial ?? false);
+  const [trialEnds, setTrialEnds] = useState<string | null>(existing?.trial_ends ?? null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  /**
+   * Turning on "free trial" seeds an end date and moves the renewal to match it,
+   * since the first charge lands when the trial converts. Common trial lengths
+   * are 7, 14 and 30 days; 14 is the least-wrong default.
+   */
+  const toggleTrial = () => {
+    if (isTrial) {
+      setIsTrial(false);
+      setTrialEnds(null);
+      return;
+    }
+    const seed = trialEnds ?? addDays(new Date(), 14);
+    setIsTrial(true);
+    setTrialEnds(seed);
+    setDate(seed);
+  };
+
+  const setTrialLength = (days: number) => {
+    const end = addDays(new Date(), days);
+    setTrialEnds(end);
+    setDate(end);
+  };
 
   const save = async () => {
     setErr(null);
@@ -57,6 +89,11 @@ export default function SubscriptionForm() {
         status: existing?.status || ('active' as const),
         reminder_days_before: reminderDays,
         snoozed_until: existing?.snoozed_until ?? null,
+        is_trial: isTrial,
+        // Never keep a stale end date on a subscription that is no longer a
+        // trial — trialDaysLeft() reads both, and a leftover date would make a
+        // paid subscription look free.
+        trial_ends: isTrial ? trialEnds : null,
       };
       if (isNew) {
         await createSubscription(body);
@@ -175,7 +212,44 @@ export default function SubscriptionForm() {
             ))}
           </ScrollView>
 
-          <Text style={styles.sectionLbl}>Next renewal</Text>
+          <Text style={styles.sectionLbl}>Free trial</Text>
+          <Pressable onPress={toggleTrial} style={styles.trialRow} testID="form-trial-toggle">
+            <View style={[styles.checkbox, isTrial && styles.checkboxOn]}>
+              {isTrial && <Ionicons name="checkmark" size={16} color="#FFFFFF" />}
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.trialTitle}>{"I'm on a free trial"}</Text>
+              <Text style={styles.trialHint}>
+                {isTrial
+                  ? "Won't count towards your monthly total until it converts"
+                  : 'Get warned 7 days, 2 days and the morning it ends'}
+              </Text>
+            </View>
+          </Pressable>
+
+          {isTrial && (
+            <>
+              <View style={styles.dateBumps}>
+                {[7, 14, 30].map((d) => (
+                  <Pressable
+                    key={d}
+                    onPress={() => setTrialLength(d)}
+                    style={styles.bumpBtn}
+                    testID={`form-trial-${d}`}
+                  >
+                    <Text style={styles.bumpTxt}>{d} days</Text>
+                  </Pressable>
+                ))}
+              </View>
+              {trialEnds && (
+                <Text style={styles.trialEndsTxt}>
+                  Ends {format(new Date(trialEnds), 'EEE, MMM d')} — first charge that day
+                </Text>
+              )}
+            </>
+          )}
+
+          <Text style={styles.sectionLbl}>{isTrial ? 'First charge' : 'Next renewal'}</Text>
           <View style={styles.dateRow}>
             <View style={styles.dateBox}>
               <Text style={styles.dateVal}>{format(new Date(date), 'EEE, MMM d, yyyy')}</Text>
@@ -257,6 +331,20 @@ const styles = StyleSheet.create({
   dateBumps: { flexDirection: 'row', gap: 8, marginTop: 8 },
   bumpBtn: { paddingHorizontal: 14, height: 36, borderRadius: theme.radius.pill, backgroundColor: theme.color.surfaceSecondary, alignItems: 'center', justifyContent: 'center' },
   bumpTxt: { color: theme.color.ink, fontWeight: '700', fontSize: 13 },
+  trialRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: theme.color.border,
+    borderRadius: 14, padding: 16,
+  },
+  checkbox: {
+    width: 24, height: 24, borderRadius: 7,
+    borderWidth: 2, borderColor: theme.color.border,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  checkboxOn: { backgroundColor: theme.color.brandPrimary, borderColor: theme.color.brandPrimary },
+  trialTitle: { color: theme.color.ink, fontSize: 15, fontWeight: '700' },
+  trialHint: { color: theme.color.inkMuted, fontSize: 12, marginTop: 2 },
+  trialEndsTxt: { color: theme.color.brandSecondary, fontSize: 13, fontWeight: '600', marginTop: 10 },
   reminderRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
   reminderBtn: {
     paddingHorizontal: 14, height: 40, borderRadius: theme.radius.pill,

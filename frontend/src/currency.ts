@@ -198,8 +198,7 @@ export function convertToPrimary(
   return to === 'USD' ? inr / current : inr;
 }
 
-export function monthlyEquivalent(amount: number, cycle: string): number {
-  if (cycle === 'yearly') return amount / 12;
-  if (cycle === 'weekly') return amount * 4.33;
-  return amount;
-}
+// Lives in cycles.ts, which has no dependencies and so can be unit-tested
+// directly. Re-exported here because most callers want money and cycle maths
+// from the same place.
+export { monthlyEquivalent } from './cycles';

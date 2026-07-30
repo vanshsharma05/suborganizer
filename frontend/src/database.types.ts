@@ -32,7 +32,19 @@ type SubscriptionRow = {
   status: SubStatus;
   reminder_days_before: number;
   snoozed_until: string | null;
+  is_trial: boolean;
+  trial_ends: string | null;
   created_at: string;
+};
+
+type PriceChangeRow = {
+  id: string;
+  subscription_id: string;
+  user_id: string;
+  old_amount: number;
+  new_amount: number;
+  currency: string;
+  changed_at: string;
 };
 
 export type Database = {
@@ -61,10 +73,20 @@ export type Database = {
           status?: SubStatus;
           reminder_days_before?: number;
           snoozed_until?: string | null;
+          is_trial?: boolean;
+          trial_ends?: string | null;
           created_at?: string;
         };
         Row: SubscriptionRow;
         Update: Partial<Omit<SubscriptionRow, 'id' | 'user_id'>>;
+        Relationships: [];
+      };
+      // Rows are written only by the trigger in schema.sql, so there is no
+      // client-side insert or update shape to describe.
+      price_changes: {
+        Row: PriceChangeRow;
+        Insert: never;
+        Update: never;
         Relationships: [];
       };
     };

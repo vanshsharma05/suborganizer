@@ -14,7 +14,20 @@ export type Subscription = {
   status: 'active' | 'paused' | 'cancelled';
   reminder_days_before?: number;
   snoozed_until?: string | null;
+  /** Started as a free trial. Whether it still *is* one comes from src/trials.ts. */
+  is_trial?: boolean;
+  trial_ends?: string | null;
   created_at?: string;
+};
+
+/** One logged amount change, newest first. Written by a trigger, never by us. */
+export type PriceChange = {
+  id: string;
+  subscription_id: string;
+  old_amount: number;
+  new_amount: number;
+  currency: string;
+  changed_at: string;
 };
 
 export type ReminderItem = Subscription & {
@@ -222,6 +235,35 @@ export async function keepSubscription(sub: Subscription): Promise<Subscription>
     .single();
   if (error) throw new Error(error.message);
   return toSub(data);
+}
+
+// ------------------------------------------------------------ price changes --
+
+/**
+ * Amount changes for the signed-in user, newest first.
+ *
+ * Rows are inserted by the `subscriptions_log_price_change` trigger, so this
+ * catches an edit from the form and a reconcile from the Gmail scan alike.
+ */
+export async function listPriceChanges(limit = 50): Promise<PriceChange[]> {
+  const { data, error } = await supabase
+    .from('price_changes')
+    .select('id, subscription_id, old_amount, new_amount, currency, changed_at')
+    .order('changed_at', { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(error.message);
+
+  return (data ?? []).map((r) => ({
+    ...r,
+    old_amount: Number(r.old_amount),
+    new_amount: Number(r.new_amount),
+  }));
+}
+
+/** Forget a logged change — the "dismiss" action on a price-rise card. */
+export async function dismissPriceChange(id: string): Promise<void> {
+  const { error } = await supabase.from('price_changes').delete().eq('id', id);
+  if (error) throw new Error(error.message);
 }
 
 // ----------------------------------------------------------------- reminders --

@@ -7,10 +7,13 @@ import { theme } from './theme';
 import { BrandAvatar, formatMoney } from './ui';
 import { cancelSubscription, keepSubscription, ReminderItem, snoozeSubscription } from './api';
 import { useAuth } from './auth-context';
+import { CancelSheet } from './cancel-sheet';
 
 export function RemindersSection() {
-  const { reminders, refreshReminders, refreshSubs } = useAuth();
+  const { reminders, refreshSubs } = useAuth();
   const [busyId, setBusyId] = useState<string | null>(null);
+  // The subscription whose cancellation sheet is open, if any.
+  const [cancelling, setCancelling] = useState<ReminderItem | null>(null);
 
   if (!reminders || reminders.length === 0) return null;
 
@@ -46,7 +49,10 @@ export function RemindersSection() {
           >
             <ReminderRow item={r} busy={busyId === r.id}
               onKeep={() => act(r, () => keepSubscription(r))}
-              onCancel={() => act(r, () => cancelSubscription(r.id))}
+              // Opens the sheet rather than marking it cancelled outright:
+              // only the merchant can stop the charge, and saying "cancelled"
+              // before that has happened is the lie that costs people money.
+              onCancel={() => setCancelling(r)}
               onSnooze={() => act(r, () => snoozeSubscription(r.id, 3))}
             />
           </Animated.View>
@@ -56,6 +62,16 @@ export function RemindersSection() {
       {reminders.length > 4 && (
         <Text style={styles.moreText}>+ {reminders.length - 4} more coming up soon</Text>
       )}
+
+      <CancelSheet
+        sub={cancelling}
+        onClose={() => setCancelling(null)}
+        onConfirmCancelled={async () => {
+          const item = cancelling;
+          setCancelling(null);
+          if (item) await act(item, () => cancelSubscription(item.id));
+        }}
+      />
     </View>
   );
 }

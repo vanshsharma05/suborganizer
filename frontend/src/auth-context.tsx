@@ -6,7 +6,9 @@ import { disconnectGmail } from './gmail/auth';
 import {
   deriveReminders,
   fetchProfile,
+  listPriceChanges,
   listSubscriptions,
+  PriceChange,
   ReminderItem,
   Subscription,
   User,
@@ -28,6 +30,8 @@ type AuthCtx = {
   refreshSubs: () => Promise<void>;
   reminders: ReminderItem[];
   refreshReminders: () => Promise<void>;
+  priceChanges: PriceChange[];
+  refreshPriceChanges: () => Promise<void>;
   setPro: (v: boolean) => void;
 };
 
@@ -37,6 +41,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [subs, setSubs] = useState<Subscription[]>([]);
+  const [priceChanges, setPriceChanges] = useState<PriceChange[]>([]);
 
   // Reminders are a pure function of the subscription list, so deriving them
   // keeps the two from ever drifting out of sync.
@@ -64,6 +69,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await refreshSubs();
   }, [refreshSubs]);
 
+  const refreshPriceChanges = useCallback(async () => {
+    try {
+      setPriceChanges(await listPriceChanges());
+    } catch {
+      // Same as subs: a failed pull should not blank what is on screen.
+    }
+  }, []);
+
   useEffect(() => {
     let active = true;
 
@@ -75,9 +88,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (session?.user) {
         await refreshUser();
         await refreshSubs();
+        // Not awaited: a price-rise banner is not worth delaying first paint.
+        void refreshPriceChanges();
       } else {
         setUser(null);
         setSubs([]);
+        setPriceChanges([]);
       }
       setLoading(false);
     });
@@ -86,7 +102,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       active = false;
       sub.subscription.unsubscribe();
     };
-  }, [refreshUser, refreshSubs]);
+  }, [refreshUser, refreshSubs, refreshPriceChanges]);
 
   const signInWithEmail = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({
@@ -146,6 +162,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await supabase.auth.signOut();
     setUser(null);
     setSubs([]);
+    setPriceChanges([]);
   };
 
   const setPro = (v: boolean) => setUser((u) => (u ? { ...u, is_pro: v } : u));
@@ -164,6 +181,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         refreshSubs,
         reminders,
         refreshReminders,
+        priceChanges,
+        refreshPriceChanges,
         setPro,
       }}
     >

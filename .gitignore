@@ -92,3 +92,6 @@ release/
 
 # Supabase CLI local state
 supabase/.temp/
+
+# npm lockfile — EAS builds from yarn.lock, and two lockfiles drift apart
+frontend/package-lock.json

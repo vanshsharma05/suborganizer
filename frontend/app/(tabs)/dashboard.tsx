@@ -13,7 +13,9 @@ import { theme, IMAGES, CATEGORY_COLORS } from '@/src/theme';
 import { useAuth, monthlyEquivalent } from '@/src/auth-context';
 import { BrandAvatar, formatMoney, formatMoneyRounded } from '@/src/ui';
 import { convertToPrimary, fmtMoney, useExchangeRate } from '@/src/currency';
-import { Subscription } from '@/src/api';
+import { dismissPriceChange, Subscription } from '@/src/api';
+import { activeTrials, splitByTrial, trialDaysLeft, trialLabel } from '@/src/trials';
+import { findPriceRises } from '@/src/price-watch';
 import { differenceInCalendarDays, parseISO, format } from 'date-fns';
 import { RemindersSection } from '@/src/reminders';
 import { getNotifPermission, requestNotifPermission, rescheduleReminders } from '@/src/notifications';
@@ -83,7 +85,8 @@ function DonutChart({ data, total }: { data: { key: string; value: number }[]; t
 export default function Dashboard() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { user, subs, refreshSubs, refreshReminders } = useAuth();
+  const { user, subs, refreshSubs, refreshReminders, priceChanges, refreshPriceChanges } =
+    useAuth();
   const [refreshing, setRefreshing] = useState(false);
   const [notifPromptShown, setNotifPromptShown] = useState(false);
   const [notifState, setNotifState] = useState<'unknown' | 'granted' | 'denied' | 'blocked' | 'unsupported'>('unknown');
@@ -107,16 +110,27 @@ export default function Dashboard() {
     }
   };
 
-  const activeSubs = subs.filter((s) => s.status === 'active');
+  const allActive = subs.filter((s) => s.status === 'active');
   const primaryCurrency = (user?.primary_currency || 'INR').toUpperCase();
   // In the deps below so totals recompute when the live USD rate arrives.
   const rate = useExchangeRate();
+
+  // A trial costs nothing today. Counting it would overstate what actually
+  // leaves the account, so it is held out of the total and surfaced separately
+  // as what the total *becomes* — which is the number worth reacting to.
+  const { charging: activeSubs, trialing } = useMemo(() => splitByTrial(allActive), [allActive]);
 
   const monthly = useMemo(
     () => activeSubs.reduce((sum, s) => sum + convertToPrimary(monthlyEquivalent(s), s.currency, primaryCurrency), 0),
     [activeSubs, primaryCurrency, rate],
   );
   const yearly = monthly * 12;
+
+  /** What the monthly total rises by if every running trial converts. */
+  const trialMonthly = useMemo(
+    () => trialing.reduce((sum, s) => sum + convertToPrimary(monthlyEquivalent(s), s.currency, primaryCurrency), 0),
+    [trialing, primaryCurrency, rate],
+  );
 
   const byCat = useMemo(() => {
     const m: Record<string, number> = {};
@@ -133,9 +147,22 @@ export default function Dashboard() {
       .slice(0, 8);
   }, [activeSubs]);
 
+  // Trials, soonest to convert first — the most time-critical thing on screen.
+  const trials = useMemo(() => activeTrials(allActive), [allActive]);
+
+  const rises = useMemo(() => findPriceRises(priceChanges, subs), [priceChanges, subs]);
+  const risesAnnual = useMemo(
+    () =>
+      rises.reduce(
+        (sum, r) => sum + convertToPrimary(r.annualDelta, r.sub.currency, primaryCurrency),
+        0,
+      ),
+    [rises, primaryCurrency, rate],
+  );
+
   const onRefresh = async () => {
     setRefreshing(true);
-    await Promise.all([refreshSubs(), refreshReminders()]);
+    await Promise.all([refreshSubs(), refreshReminders(), refreshPriceChanges()]);
     setRefreshing(false);
   };
 
@@ -182,8 +209,96 @@ export default function Dashboard() {
                 <Text style={hStyles.heroChipText}>{activeSubs.length} active</Text>
               </View>
             </View>
+            {trialing.length > 0 && (
+              <Text style={hStyles.heroTrialNote} testID="dashboard-trial-note">
+                +{formatMoneyRounded(trialMonthly, primaryCurrency)}/mo if{' '}
+                {trialing.length === 1 ? 'your trial' : `all ${trialing.length} trials`} convert
+              </Text>
+            )}
           </Animated.View>
         </View>
+
+        {/* Trials first — the only thing here with a hard deadline attached. */}
+        {trials.length > 0 && (
+          <Animated.View entering={FadeInDown.duration(450)} style={hStyles.alertCard} testID="dashboard-trials">
+            <View style={hStyles.alertHead}>
+              <View style={[hStyles.alertIcon, { backgroundColor: theme.color.brandSecondary }]}>
+                <Ionicons name="hourglass-outline" size={18} color="#FFFFFF" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={hStyles.alertTitle}>
+                  {trials.length === 1 ? 'Free trial ending' : `${trials.length} free trials ending`}
+                </Text>
+                <Text style={hStyles.alertSub}>Cancel before it converts and you pay nothing.</Text>
+              </View>
+            </View>
+
+            {trials.map((s) => {
+              const left = trialDaysLeft(s) ?? 0;
+              return (
+                <Pressable
+                  key={s.id}
+                  onPress={() => router.push(`/subscription/${s.id}`)}
+                  style={hStyles.trialItem}
+                  testID={`trial-${s.name}`}
+                >
+                  <BrandAvatar sub={s} size={38} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={hStyles.trialName} numberOfLines={1}>{s.name}</Text>
+                    <Text style={[hStyles.trialWhen, left <= 2 && { color: theme.color.error }]}>
+                      {trialLabel(left)} · then {formatMoney(s.amount, s.currency)}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={theme.color.inkMuted} />
+                </Pressable>
+              );
+            })}
+          </Animated.View>
+        )}
+
+        {/* Price rises */}
+        {rises.length > 0 && (
+          <Animated.View entering={FadeInDown.duration(450)} style={hStyles.alertCard} testID="dashboard-price-rises">
+            <View style={hStyles.alertHead}>
+              <View style={[hStyles.alertIcon, { backgroundColor: theme.color.brandPrimary }]}>
+                <Ionicons name="trending-up" size={18} color="#FFFFFF" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={hStyles.alertTitle}>
+                  {rises.length === 1 ? 'A price went up' : `${rises.length} prices went up`}
+                </Text>
+                <Text style={hStyles.alertSub}>
+                  {formatMoneyRounded(risesAnnual, primaryCurrency)} more per year than before.
+                </Text>
+              </View>
+            </View>
+
+            {rises.map((r) => (
+              <View key={r.change.id} style={hStyles.trialItem}>
+                <BrandAvatar sub={r.sub} size={38} />
+                <View style={{ flex: 1 }}>
+                  <Text style={hStyles.trialName} numberOfLines={1}>{r.sub.name}</Text>
+                  <Text style={hStyles.trialWhen}>
+                    {formatMoney(r.change.old_amount, r.change.currency)} →{' '}
+                    {formatMoney(r.change.new_amount, r.change.currency)} · +{r.percent}% ·{' '}
+                    {formatMoneyRounded(r.annualDelta, r.change.currency)}/yr
+                  </Text>
+                </View>
+                <Pressable
+                  onPress={async () => {
+                    await dismissPriceChange(r.change.id);
+                    await refreshPriceChanges();
+                  }}
+                  hitSlop={10}
+                  style={hStyles.dismissBtn}
+                  testID={`dismiss-rise-${r.sub.name}`}
+                >
+                  <Ionicons name="close" size={16} color={theme.color.inkMuted} />
+                </Pressable>
+              </View>
+            ))}
+          </Animated.View>
+        )}
 
         {/* Reminders — appears above scan actions when there are any */}
         <RemindersSection />
@@ -337,6 +452,34 @@ const hStyles = StyleSheet.create({
     paddingHorizontal: 12, paddingVertical: 8, borderWidth: 1, borderColor: theme.color.border,
   },
   heroChipText: { color: theme.color.ink, fontSize: 12, fontWeight: '600' },
+  heroTrialNote: {
+    color: theme.color.brandSecondary, fontSize: 12.5, fontWeight: '700',
+    marginTop: 12,
+  },
+
+  alertCard: {
+    marginHorizontal: 24, marginTop: 20, padding: 18,
+    borderRadius: theme.radius.lg, backgroundColor: '#FFFFFF',
+    borderWidth: 1, borderColor: theme.color.border, gap: 4,
+  },
+  alertHead: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 6 },
+  alertIcon: {
+    width: 34, height: 34, borderRadius: 12,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  alertTitle: { color: theme.color.ink, fontSize: 15, fontWeight: '800' },
+  alertSub: { color: theme.color.inkMuted, fontSize: 12.5, marginTop: 1 },
+  trialItem: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingVertical: 10, borderTopWidth: 1, borderTopColor: theme.color.surfaceSecondary,
+  },
+  trialName: { color: theme.color.ink, fontSize: 14, fontWeight: '700' },
+  trialWhen: { color: theme.color.inkSoft, fontSize: 12, fontWeight: '600', marginTop: 1 },
+  dismissBtn: {
+    width: 28, height: 28, borderRadius: 14,
+    backgroundColor: theme.color.surfaceSecondary,
+    alignItems: 'center', justifyContent: 'center',
+  },
   dot: { width: 8, height: 8, borderRadius: 4 },
   notifPrompt: {
     marginTop: 12, marginHorizontal: 24, padding: 14, borderRadius: 20,
