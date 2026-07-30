@@ -1,4 +1,3 @@
-import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import { Subscription } from './api';
 import { parseISO, subDays, isAfter } from 'date-fns';
@@ -18,7 +17,6 @@ const LOCAL_ID_PREFIX = 'suborg-';
 export type NotifPermissionState = 'granted' | 'denied' | 'blocked' | 'undetermined' | 'unsupported';
 
 export async function getNotifPermission(): Promise<{ state: NotifPermissionState; canAskAgain: boolean }> {
-  if (Platform.OS === 'web') return { state: 'unsupported', canAskAgain: false };
   try {
     const s = await Notifications.getPermissionsAsync();
     const state: NotifPermissionState =
@@ -32,7 +30,6 @@ export async function getNotifPermission(): Promise<{ state: NotifPermissionStat
 }
 
 export async function requestNotifPermission(): Promise<NotifPermissionState> {
-  if (Platform.OS === 'web') return 'unsupported';
   try {
     const r = await Notifications.requestPermissionsAsync();
     if (r.status === 'granted') return 'granted';
@@ -46,10 +43,9 @@ export async function requestNotifPermission(): Promise<NotifPermissionState> {
 /**
  * Schedule (or re-schedule) local reminders for a user's active subs.
  * Fires at 9 AM local time, `reminder_days_before` days before renewal.
- * Silently no-ops on web or when permission is not granted.
+ * Silently no-ops when permission is not granted.
  */
 export async function rescheduleReminders(subs: Subscription[]): Promise<number> {
-  if (Platform.OS === 'web') return 0;
   const { state } = await getNotifPermission();
   if (state !== 'granted') return 0;
   try {

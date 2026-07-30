@@ -9,8 +9,7 @@
       "env": {
         "EXPO_PUBLIC_SUPABASE_URL": "https://enygjgbohhpmgwrxclhl.supabase.co",
         "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVueWdqZ2JvaGhwbWd3cnhjbGhsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODUxMzM4OTUsImV4cCI6MjEwMDcwOTg5NX0.YhppoGIlPz9ZoQusVnjtKiCE-K6Wwm7RcxHKKXqM1J4",
-        "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "935820170470-rnr0136h5gqnbbrj23u6pp0g4kc3g804.apps.googleusercontent.com",
-        "EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID": "935820170470-4ivc848fiksvbl7fumbql7a3i2peemf1.apps.googleusercontent.com"
+        "EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID": "935820170470-rnr0136h5gqnbbrj23u6pp0g4kc3g804.apps.googleusercontent.com"
       }
     },
     "development": {

@@ -37,16 +37,15 @@ Then, still under Google Auth Platform:
 
 **Google Auth Platform → Clients → Create client.** One per platform you build
 for — Google checks the redirect against the client *type*, so one client will
-not cover all three.
+not cover both.
 
 | Platform | Type | Enter |
 |---|---|---|
 | Android | Android | Package `com.suborganizer.app` + signing SHA-1 |
 | iOS | iOS | Bundle ID `com.suborganizer.app` |
-| Web | Web application | Redirect URI `http://localhost:8081/gmail-callback` |
 
-The Web client also has a **client secret**. It is needed — but it goes on the
-server, never in `.env`. See step 5.
+Both are *public* clients: they exchange on the client id alone, with PKCE, and
+no client secret is involved anywhere in the app.
 
 Debug SHA-1 for Android:
 
@@ -61,37 +60,18 @@ For an EAS build take the SHA-1 from `eas credentials` instead.
 ```
 EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID=...apps.googleusercontent.com
 EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID=...apps.googleusercontent.com
-EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID=...apps.googleusercontent.com
 ```
 
 ```bash
 npx expo start -c        # -c so Expo re-inlines the new values
 ```
 
+Client ids are fine in `.env` — they are public by design, and neither client
+type has a secret to leak.
+
 Android needs the package-name URL scheme, already in `app.json`. It is a
-native change, so Expo Go will not pick it up — use `npx expo run:android`.
-
-Client **ids** are fine here — they are public by design. The client **secret**
-is not; it goes in step 5.
-
-## 5. Deploy the token exchange (web only)
-
-Skip this if you only build for Android and iOS — they never call it.
-
-```bash
-supabase functions deploy gmail-oauth
-
-supabase secrets set \
-  GOOGLE_WEB_CLIENT_ID=...apps.googleusercontent.com \
-  GOOGLE_WEB_CLIENT_SECRET=GOCSPX-... \
-  GMAIL_ALLOWED_REDIRECTS=http://localhost:8081/gmail-callback
-```
-
-`GMAIL_ALLOWED_REDIRECTS` is a comma-separated allowlist. Add your deployed web
-origin when you have one — a redirect that is not on the list is refused.
-
-The function requires a signed-in Supabase user, so it cannot be used as an
-open code-redemption endpoint by anyone who finds the URL.
+native change, so a real build is required — `npx expo run:android`, or an EAS
+build. Expo Go cannot own the scheme and so cannot complete Gmail consent.
 
 ---
 
@@ -100,16 +80,15 @@ open code-redemption endpoint by anyone who finds the URL.
 - **`gmail.readonly` is a restricted scope.** Up to 100 hand-added test users
   work immediately; going public needs Google verification plus a paid CASA
   security assessment. No code changes when that lands.
-- **Web redeems its code through an Edge Function, not directly.** A Google
-  *Web application* client is a confidential client: it requires `client_secret`
-  at the token endpoint even alongside PKCE. Without it Google answers
-  `client_secret is missing` and the connect fails outright. The secret cannot
-  ship in the bundle, so `supabase/functions/gmail-oauth` holds it and redeems
-  on the app's behalf (step 5). Android and iOS clients are *public* clients —
-  they exchange and refresh on the client id alone and never call the function.
-
-  Never put the secret in an `EXPO_PUBLIC_*` var. Everything with that prefix is
-  inlined into the JS bundle, which any visitor can download.
+- **Native only.** Gmail scanning needs an OAuth client whose redirect the app
+  itself owns, which means a real Android or iOS build. There is deliberately no
+  web path: a Google *Web application* client is confidential and demands
+  `client_secret` at the token endpoint even alongside PKCE, and a secret cannot
+  ship in a JS bundle. Supporting web would mean a server holding the secret and
+  redeeming on the app's behalf — see git history for the version that did, if
+  it is ever wanted back.
+- **Expo Go cannot do it either**, for the same reason: it cannot claim
+  `com.suborganizer.app://`, and Google will not redirect to an `exp://` URL.
 
 ---
 

@@ -1,7 +1,5 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { Platform } from 'react-native';
 import * as AuthSession from 'expo-auth-session';
-import Constants from 'expo-constants';
 import * as WebBrowser from 'expo-web-browser';
 import { supabase } from './supabase';
 import { disconnectGmail } from './gmail/auth';
@@ -13,33 +11,6 @@ import {
   Subscription,
   User,
 } from './api';
-
-// Required on web so the popup/redirect can hand the session back.
-WebBrowser.maybeCompleteAuthSession();
-
-/**
- * Where Google should send the user back to.
- *
- * Expo Go needs special handling. `makeRedirectUri()` asks expo-linking, which
- * discards the dev-server host whenever the app declares a custom scheme — and
- * app.json declares `suborganizer`. The result is `suborganizer://auth-callback`,
- * a scheme Expo Go does not own, so the round trip dies and Supabase falls back
- * to the Site URL. expo-linking documents its Expo Go output as unstable and
- * explicitly says not to rely on it for auth callbacks.
- *
- * So in Expo Go the `exp://` deep link is built from the known host instead of
- * being inferred. Real builds do own the scheme and take the normal path.
- */
-function authRedirectUri(): string {
-  const host = Constants.expoConfig?.hostUri;
-  const inExpoGo = Constants.executionEnvironment === 'storeClient';
-
-  if (Platform.OS !== 'web' && inExpoGo && host) {
-    return `exp://${host}/--/auth-callback`;
-  }
-
-  return AuthSession.makeRedirectUri({ scheme: 'suborganizer', path: 'auth-callback' });
-}
 
 type AuthCtx = {
   user: User | null;
@@ -141,19 +112,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signInWithGoogle = async () => {
-    const redirectTo = authRedirectUri();
+    const redirectTo = AuthSession.makeRedirectUri({
+      scheme: 'suborganizer',
+      path: 'auth-callback',
+    });
 
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
         redirectTo,
-        // On native we drive the browser ourselves so we can capture the
-        // redirect; on web we let supabase-js navigate the page.
-        skipBrowserRedirect: Platform.OS !== 'web',
+        // We drive the browser ourselves so the redirect can be captured.
+        skipBrowserRedirect: true,
       },
     });
     if (error) throw new Error(error.message);
-    if (Platform.OS === 'web') return;
     if (!data?.url) throw new Error('Google sign-in did not return a URL');
 
     const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);

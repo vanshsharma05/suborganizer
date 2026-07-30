@@ -4,7 +4,7 @@ import 'react-native-url-polyfill/auto';
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { createClient } from '@supabase/supabase-js';
-import { AppState, Platform } from 'react-native';
+import { AppState } from 'react-native';
 import type { Database } from './database.types';
 
 const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
@@ -25,9 +25,9 @@ export const supabase = createClient<Database>(url, anonKey, {
     storage: AsyncStorage,
     persistSession: true,
     autoRefreshToken: true,
-    // Only the web build ever lands back on a URL carrying auth fragments;
-    // native completes the round trip through expo-auth-session instead.
-    detectSessionInUrl: Platform.OS === 'web',
+    // Native completes the OAuth round trip through expo-auth-session, so
+    // supabase-js is never handed a URL carrying auth fragments.
+    detectSessionInUrl: false,
     // PKCE is what lets the native OAuth flow exchange a code for a session
     // without ever shipping a client secret inside the app.
     flowType: 'pkce',
@@ -37,9 +37,7 @@ export const supabase = createClient<Database>(url, anonKey, {
 // Supabase refreshes tokens on a timer, which the OS suspends in the
 // background. Re-sync on foreground so a returning user is not bounced to the
 // login screen by an expired token.
-if (Platform.OS !== 'web') {
-  AppState.addEventListener('change', (state) => {
-    if (state === 'active') supabase.auth.startAutoRefresh();
-    else supabase.auth.stopAutoRefresh();
-  });
-}
+AppState.addEventListener('change', (state) => {
+  if (state === 'active') supabase.auth.startAutoRefresh();
+  else supabase.auth.stopAutoRefresh();
+});

@@ -30,11 +30,6 @@
         "android.permission.WRITE_EXTERNAL_STORAGE"
       ]
     },
-    "web": {
-      "bundler": "metro",
-      "output": "single",
-      "favicon": "./assets/images/favicon.png"
-    },
     "plugins": [
       "expo-router",
       "expo-notifications",
