@@ -1,21 +1,39 @@
-import React, { useState } from 'react';
+/**
+ * Account.
+ *
+ * Rows are grouped by what they are, rather than listed in the order they were
+ * written. The version this replaced had "Privacy policy" and "Delete account"
+ * one above the other in the same undifferentiated stack — an irreversible
+ * action looking exactly like one that opens a web page.
+ *
+ * Every row that has a value shows it on the right. A settings screen where you
+ * must open something to find out what it is set to is one you open twice.
+ */
+
+import React, { useCallback, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Linking, Alert } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import Constants from 'expo-constants';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { LinearGradient } from 'expo-linear-gradient';
+
 import { theme } from '@/src/theme';
 import { useAuth } from '@/src/auth-context';
 import { updatePrimaryCurrency } from '@/src/api';
 import { CURRENCIES, symbolFor } from '@/src/currency';
 import { resetStory } from '@/src/story-storage';
 import { usePurchases } from '@/src/purchases';
+import { PRODUCTS } from '@/src/entitlements';
+import { UpgradeSheet } from '@/src/paywall';
+import { disconnectGmail, getGmailConnection, type GmailConnection } from '@/src/gmail';
 import { IconButton, Stat } from '@/src/ui';
 import { Press, Reveal } from '@/src/motion';
 
 const SUPPORT_EMAIL = 'taskteamprosupport@gmail.com';
 const SITE = 'https://vanshsharma05.github.io/suborganizer';
+
+const CURRENCY_NAME: Record<string, string> = { INR: 'Indian Rupee', USD: 'US Dollar' };
 
 /** Best-effort external open. A missing browser or mail client is not an error worth a dialog. */
 async function openUrl(url: string): Promise<void> {
@@ -26,13 +44,62 @@ async function openUrl(url: string): Promise<void> {
   }
 }
 
+type Row = {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  /** Shown right-aligned, so the row answers itself without being opened. */
+  value?: string;
+  colour: string;
+  destructive?: boolean;
+  onPress: () => void;
+};
+
+function Group({ title, rows }: { title: string; rows: Row[] }) {
+  return (
+    <View style={{ marginTop: 22 }}>
+      <Text style={s.groupTitle}>{title}</Text>
+      <View style={s.group}>
+        {rows.map((r, i) => (
+          <Press key={r.label} onPress={r.onPress} scale={0.99} testID={`profile-${r.label}`}>
+            <View style={[s.row, i === rows.length - 1 && { borderBottomWidth: 0 }]}>
+              <View style={[s.rowIcon, { backgroundColor: r.colour + '18' }]}>
+                <Ionicons name={r.icon} size={17} color={r.colour} />
+              </View>
+              <Text style={[s.rowLabel, r.destructive === true && { color: theme.color.error }]}>
+                {r.label}
+              </Text>
+              {r.value !== undefined && (
+                <Text style={s.rowValue} numberOfLines={1}>{r.value}</Text>
+              )}
+              <Ionicons name="chevron-forward" size={16} color={theme.color.inkFaint} />
+            </View>
+          </Press>
+        ))}
+      </View>
+    </View>
+  );
+}
+
 export default function ProfileScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { user, logout, subs, refreshUser } = useAuth();
-  const { pro, refresh: refreshPurchases, resetForDev: resetPurchases } = usePurchases();
+  const { pro, canSell, refresh: refreshPurchases, resetForDev: resetPurchases } = usePurchases();
+
   const [savingCur, setSavingCur] = useState(false);
   const [curError, setCurError] = useState<string | null>(null);
+  const [gmail, setGmail] = useState<GmailConnection | null>(null);
+  const [upgrading, setUpgrading] = useState(false);
+
+  // On focus rather than on mount: Gmail is connected on another screen, and
+  // this one should not still read "Not connected" when you come back.
+  useFocusEffect(
+    useCallback(() => {
+      getGmailConnection()
+        .then(setGmail)
+        .catch(() => setGmail(null));
+    }, []),
+  );
 
   const doLogout = async () => {
     await logout();
@@ -80,23 +147,40 @@ export default function ProfileScreen() {
     );
   };
 
-  const active = subs.filter((s) => s.status === 'active').length;
+  const confirmDisconnect = () => {
+    Alert.alert(
+      'Disconnect Gmail?',
+      'We stop reading your inbox. Subscriptions already found stay in your list.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Disconnect',
+          style: 'destructive',
+          onPress: async () => {
+            await disconnectGmail();
+            setGmail(null);
+          },
+        },
+      ],
+    );
+  };
+
+  const active = subs.filter((x) => x.status === 'active').length;
   const primary = (user?.primary_currency || 'INR').toUpperCase();
   const version = Constants.expoConfig?.version ?? '1.0.0';
 
-  // Every row here does something. They used to be Pressables with no onPress,
-  // so half this screen looked interactive and answered nothing — including two
-  // rows ("Security", "Payment methods") for features that do not exist.
-  const rows: {
-    icon: keyof typeof Ionicons.glyphMap;
-    label: string;
-    color: string;
-    onPress: () => void;
-  }[] = [
+  const preferences: Row[] = [
+    {
+      icon: 'cash-outline',
+      label: 'Currency',
+      value: savingCur ? '…' : `${CURRENCY_NAME[primary] ?? primary} ${symbolFor(primary)}`,
+      colour: theme.color.brandPrimary,
+      onPress: cyclePrimaryCurrency,
+    },
     {
       icon: 'notifications-outline',
-      label: 'Notification settings',
-      color: '#D97706',
+      label: 'Notifications',
+      colour: theme.color.warning,
       onPress: () => {
         void Linking.openSettings();
       },
@@ -104,21 +188,30 @@ export default function ProfileScreen() {
     {
       icon: 'play-circle-outline',
       label: 'Replay your rundown',
-      color: theme.color.brandPrimary,
+      colour: theme.color.brandSecondary,
       onPress: async () => {
         // Clearing the stored date is what makes the launch path play it again.
         await resetStory();
         router.replace('/story');
       },
     },
+  ];
+
+  const data: Row[] = [
+    {
+      icon: 'mail-outline',
+      label: 'Gmail',
+      value: gmail ? gmail.email ?? 'Connected' : 'Not connected',
+      colour: theme.color.brandSecondary,
+      onPress: gmail ? confirmDisconnect : () => router.push('/scan'),
+    },
     {
       // Play keeps the receipt for one-time products forever, so this is a read,
       // not a transaction. It exists because "I paid and it is gone" on a new
-      // phone is the review that costs the most, and because Play's own policy
-      // expects a way back to something already bought.
+      // phone is the review that costs the most.
       icon: 'refresh-outline',
       label: 'Restore purchases',
-      color: theme.color.brandSecondary,
+      colour: theme.color.inkSoft,
       onPress: async () => {
         await refreshPurchases();
         Alert.alert(
@@ -134,7 +227,7 @@ export default function ProfileScreen() {
           {
             icon: 'bug-outline' as const,
             label: 'Reset purchases (dev)',
-            color: theme.color.inkMuted,
+            colour: theme.color.inkMuted,
             onPress: async () => {
               await resetPurchases();
               Alert.alert('Reset', 'Back to owning nothing. The paywall is live again.');
@@ -142,27 +235,35 @@ export default function ProfileScreen() {
           },
         ]
       : []),
+  ];
+
+  const support: Row[] = [
     {
       icon: 'help-circle-outline',
       label: 'Help & support',
-      color: '#0D9488',
+      colour: theme.color.brandSecondary,
       onPress: () =>
         void openUrl(
-          `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(
-            `SubOrganizer support (v${version})`,
-          )}`,
+          `mailto:${SUPPORT_EMAIL}?subject=${encodeURIComponent(`SubOrganizer support (v${version})`)}`,
         ),
     },
     {
       icon: 'document-text-outline',
       label: 'Privacy policy',
-      color: '#8A867F',
+      colour: theme.color.inkMuted,
       onPress: () => void openUrl(`${SITE}/privacy.html`),
     },
+  ];
+
+  // Kept apart, and last. An irreversible action should never sit one row below
+  // something that merely opens a web page.
+  const danger: Row[] = [
+    { icon: 'log-out-outline', label: 'Log out', colour: theme.color.error, onPress: doLogout },
     {
       icon: 'trash-outline',
       label: 'Delete account',
-      color: theme.color.error,
+      colour: theme.color.error,
+      destructive: true,
       onPress: confirmDelete,
     },
   ];
@@ -170,7 +271,9 @@ export default function ProfileScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: theme.color.surface }}>
       <ScrollView
-        contentContainerStyle={{ paddingTop: insets.top + 20, paddingBottom: insets.bottom + 32, paddingHorizontal: 24 }}
+        contentContainerStyle={{
+          paddingTop: insets.top + 16, paddingBottom: insets.bottom + 32, paddingHorizontal: 20,
+        }}
         showsVerticalScrollIndicator={false}
       >
         <IconButton
@@ -181,67 +284,82 @@ export default function ProfileScreen() {
           testID="profile-back"
         />
 
-        <Text style={styles.title}>Profile</Text>
+        <Text style={s.title}>Account</Text>
 
-        <Reveal style={styles.userCard}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{(user?.name || 'A').charAt(0).toUpperCase()}</Text>
+        <Reveal style={s.userCard}>
+          <View style={s.avatar}>
+            <Text style={s.avatarText}>{(user?.name || 'A').charAt(0).toUpperCase()}</Text>
           </View>
           <View style={{ flex: 1 }}>
-            <Text style={styles.userName}>{user?.name}</Text>
-            <Text style={styles.userEmail} numberOfLines={1}>{user?.email}</Text>
+            <Text style={s.userName} numberOfLines={1}>{user?.name}</Text>
+            <Text style={s.userEmail} numberOfLines={1}>{user?.email}</Text>
           </View>
           {pro && (
-            <LinearGradient colors={theme.color.inkGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.proBadge}>
+            <LinearGradient
+              colors={theme.color.inkGradient}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
+              style={s.proBadge}
+            >
               <Ionicons name="star" size={11} color={theme.color.gold} />
-              <Text style={styles.proText}>PRO</Text>
+              <Text style={s.proText}>PRO</Text>
             </LinearGradient>
           )}
         </Reveal>
 
-        <Reveal delay={80} style={styles.statsRow}>
+        <Reveal delay={70} style={s.statsRow}>
           <Stat label="Active" value={String(active)} />
           <Stat label="Tracked" value={String(subs.length)} />
-          {/* Tapping cycles the currency. It is a stat and a control at once
-              because there are only two of them, and a picker for two options
-              is a menu nobody needs to open. */}
-          <Press onPress={cyclePrimaryCurrency} disabled={savingCur} style={{ flex: 1 }} testID="profile-currency">
-            <Stat label={primary} value={savingCur ? '…' : symbolFor(primary)} tone="brand" />
-          </Press>
+          <Stat label="Currency" value={symbolFor(primary)} tone="brand" />
         </Reveal>
-        {curError && <Text style={styles.err}>{curError}</Text>}
 
-        <Reveal delay={140} style={styles.list}>
-          {rows.map((r, i) => (
-            <Press key={r.label} onPress={r.onPress} scale={0.99} testID={`profile-${r.label}`}>
-              <View style={[styles.row, i === rows.length - 1 && { borderBottomWidth: 0 }]}>
-                <View style={[styles.rowIcon, { backgroundColor: r.color + '18' }]}>
-                  <Ionicons name={r.icon} size={18} color={r.color} />
+        {curError !== null && <Text style={s.err}>{curError}</Text>}
+
+        {/* Only when there is genuinely something to buy. Advertising an upgrade
+            that cannot be completed is worse than not mentioning it at all. */}
+        {!pro && canSell && (
+          <Reveal delay={120}>
+            <Press onPress={() => setUpgrading(true)} haptic="medium" testID="profile-upgrade">
+              <LinearGradient
+                colors={theme.color.coralGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={[s.upsell, theme.shadow.brand]}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={s.upsellTitle}>Unlock the full audit</Text>
+                  <Text style={s.upsellSub}>
+                    Every finding with what to change. One payment, never a subscription.
+                  </Text>
                 </View>
-                <Text style={styles.rowLabel}>{r.label}</Text>
-                <Ionicons name="chevron-forward" size={16} color={theme.color.inkFaint} />
-              </View>
+                <Ionicons name="arrow-forward-circle" size={26} color="#FFFFFF" />
+              </LinearGradient>
             </Press>
-          ))}
-        </Reveal>
+          </Reveal>
+        )}
 
-        <Press onPress={doLogout} testID="profile-logout">
-          <View style={styles.logout}>
-            <Ionicons name="log-out-outline" size={18} color={theme.color.error} />
-            <Text style={styles.logoutText}>Log out</Text>
-          </View>
-        </Press>
+        <Group title="Preferences" rows={preferences} />
+        <Group title="Data & purchases" rows={data} />
+        <Group title="Support" rows={support} />
+        <Group title="Account" rows={danger} />
 
         {/* Read from the config rather than typed in, so it cannot say 1.0 while
             the store says something else. */}
-        <Text style={styles.footer}>SubOrganizer · v{version}</Text>
+        <Text style={s.footer}>SubOrganizer · v{version}</Text>
       </ScrollView>
+
+      <UpgradeSheet
+        product={PRODUCTS.pro}
+        visible={upgrading}
+        onClose={() => setUpgrading(false)}
+      />
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const s = StyleSheet.create({
   title: { ...theme.type.title1, color: theme.color.ink },
+
   userCard: {
     flexDirection: 'row', alignItems: 'center', gap: 14, marginTop: 20,
     backgroundColor: theme.color.raised, borderRadius: theme.radius.lg, padding: 18,
@@ -263,24 +381,28 @@ const styles = StyleSheet.create({
   statsRow: { flexDirection: 'row', gap: 10, marginTop: 12 },
   err: { color: theme.color.error, ...theme.type.caption, marginTop: 10 },
 
-  list: {
-    marginTop: 20, backgroundColor: theme.color.raised,
-    borderRadius: theme.radius.lg, overflow: 'hidden',
-    ...theme.shadow.sm,
+  upsell: {
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    borderRadius: theme.radius.lg, padding: 18, marginTop: 14,
+  },
+  upsellTitle: { color: '#FFFFFF', fontSize: 15.5, fontWeight: '800', letterSpacing: -0.3 },
+  upsellSub: { color: 'rgba(255,255,255,0.85)', ...theme.type.caption, marginTop: 3, lineHeight: 16 },
+
+  groupTitle: {
+    ...theme.type.overline, color: theme.color.inkMuted, marginBottom: 8, paddingHorizontal: 4,
+  },
+  group: {
+    backgroundColor: theme.color.raised, borderRadius: theme.radius.lg,
+    overflow: 'hidden', ...theme.shadow.sm,
   },
   row: {
     flexDirection: 'row', alignItems: 'center', gap: 13,
     paddingVertical: 14, paddingHorizontal: 16,
     borderBottomWidth: 1, borderBottomColor: theme.color.border,
   },
-  rowIcon: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+  rowIcon: { width: 34, height: 34, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   rowLabel: { ...theme.type.body, color: theme.color.ink, fontWeight: '600', flex: 1 },
+  rowValue: { ...theme.type.caption, color: theme.color.inkMuted, maxWidth: 150 },
 
-  logout: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
-    marginTop: 20, paddingVertical: 16, borderRadius: theme.radius.pill,
-    backgroundColor: theme.color.errorTint,
-  },
-  logoutText: { color: theme.color.error, fontSize: 14, fontWeight: '800' },
-  footer: { color: theme.color.inkMuted, ...theme.type.caption, textAlign: 'center', marginTop: 26 },
+  footer: { color: theme.color.inkMuted, ...theme.type.caption, textAlign: 'center', marginTop: 28 },
 });
