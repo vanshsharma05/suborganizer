@@ -325,6 +325,15 @@ export function runAudit(
     primaryCurrency?: string;
     convert?: (amount: number, from: string | undefined, to: string) => number;
     today?: Date;
+    /**
+     * Finding ids the user has already looked at and rejected.
+     *
+     * Filtered here rather than in the screen so the headline total is always
+     * the sum of what is actually on display. An audit whose total disagrees
+     * with the list under it is one the user stops believing, and this is the
+     * screen whose only asset is being believed.
+     */
+    dismissed?: ReadonlySet<string>;
   } = {},
 ): Audit {
   const today = options.today ?? new Date();
@@ -350,8 +359,14 @@ export function runAudit(
   // One finding per subscription. Several checks can fire on the same row, and
   // a list that says "cancel Netflix" three ways looks broken — and worse, the
   // total would count the same rupees more than once.
+  const dismissed = options.dismissed;
   const best = new Map<string, Saving>();
   for (const s of savings) {
+    // Before the dedupe, not after. Dismissing the winner for a subscription
+    // should reveal the runner-up rather than silence that subscription
+    // entirely — someone who has ruled out the bundle may still want to know
+    // about the cheaper annual plan.
+    if (dismissed?.has(s.id)) continue;
     const prior = best.get(s.sub.id);
     if (!prior || rank(s) > rank(prior)) best.set(s.sub.id, s);
   }

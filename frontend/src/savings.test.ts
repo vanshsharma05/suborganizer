@@ -389,3 +389,76 @@ describe('the total', () => {
     expect(audit.certainCount).toBe(certain.length);
   });
 });
+
+describe('dismissed findings', () => {
+  beforeEach(() => {
+    PLAN_PRICES.length = 0;
+    BUNDLES.length = 0;
+  });
+
+  it('drops a dismissed finding and its money from the total', () => {
+    seedPlan({ domain: 'spotify.com', monthly: 119, yearly: 1189 });
+    const s = sub({ domain: 'spotify.com', amount: 119, name: 'Spotify' });
+
+    const before = runAudit([s], [], { today: TODAY });
+    expect(before.savings).toHaveLength(1);
+    expect(before.totalAnnual).toBeGreaterThan(0);
+
+    const after = runAudit([s], [], {
+      today: TODAY,
+      dismissed: new Set([before.savings[0].id]),
+    });
+
+    expect(after.savings).toHaveLength(0);
+    // The headline must equal the sum of what is on screen, or the page argues
+    // with itself.
+    expect(after.totalAnnual).toBe(0);
+  });
+
+  it('leaves other subscriptions alone', () => {
+    seedPlan({ domain: 'spotify.com', monthly: 119, yearly: 1189 });
+    seedPlan({ domain: 'youtube.com', name: 'YouTube', monthly: 149, yearly: 1490 });
+    const a = sub({ domain: 'spotify.com', amount: 119, name: 'Spotify' });
+    const b = sub({ domain: 'youtube.com', amount: 149, name: 'YouTube' });
+
+    const before = runAudit([a, b], [], { today: TODAY });
+    expect(before.savings).toHaveLength(2);
+
+    const after = runAudit([a, b], [], {
+      today: TODAY,
+      dismissed: new Set([before.savings[0].id]),
+    });
+    expect(after.savings).toHaveLength(1);
+    expect(after.savings[0].id).toBe(before.savings[1].id);
+  });
+
+  /**
+   * Dismissing is filtered before the one-per-subscription dedupe, so ruling
+   * out the winning finding surfaces the runner-up rather than silencing that
+   * subscription altogether.
+   */
+  it('reveals the next finding for the same subscription', () => {
+    seedPlan({ domain: 'hotstar.com', name: 'JioHotstar', monthly: 299, yearly: 2199 });
+    seedBundle({ includes: ['hotstar.com'] });
+    const s = sub({ domain: 'hotstar.com', amount: 299, name: 'JioHotstar' });
+
+    const before = runAudit([s], [], { today: TODAY });
+    expect(before.savings[0].kind).toBe('bundled'); // outranks annual-switch
+
+    const after = runAudit([s], [], {
+      today: TODAY,
+      dismissed: new Set([before.savings[0].id]),
+    });
+    expect(after.savings).toHaveLength(1);
+    expect(after.savings[0].kind).toBe('annual-switch');
+  });
+
+  it('an empty dismissal set changes nothing', () => {
+    seedPlan({ domain: 'spotify.com', monthly: 119, yearly: 1189 });
+    const s = sub({ domain: 'spotify.com', amount: 119, name: 'Spotify' });
+    const plain = runAudit([s], [], { today: TODAY });
+    const empty = runAudit([s], [], { today: TODAY, dismissed: new Set() });
+    expect(empty.savings).toHaveLength(plain.savings.length);
+    expect(empty.totalAnnual).toBe(plain.totalAnnual);
+  });
+});
