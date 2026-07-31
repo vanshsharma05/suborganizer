@@ -1,28 +1,36 @@
 /**
  * The list.
  *
- * Two things a list of subscriptions has to do that a generic list does not:
- * make the *comparable* cost obvious, and stay usable once there are thirty of
- * them. So every row shows what it costs per month regardless of how it is
- * actually billed — a ₹1,490 yearly plan and a ₹149 monthly one are the same
- * thing, and only one of those is obvious — and the header carries search plus
- * category filters plus a sort, because scrolling is not a search feature.
+ * Two things a list of subscriptions must do that a generic list need not: make
+ * the *comparable* cost obvious, and stay usable at thirty items. So every row
+ * carries what it costs per month regardless of how it is billed — a Rs 1,490
+ * yearly plan and a Rs 149 monthly one are the same thing and only one of those
+ * is obvious — and search is always in reach.
  *
- * Sorting defaults to cost, not to name. Someone opening this screen is
- * deciding what to cut.
+ * The controls above the list are deliberately one row, not three. The version
+ * this replaced stacked a sort row and a category row under the search box and
+ * pushed the first subscription almost off the screen; filters you have to
+ * scroll past to reach your data are a tax on every visit for the benefit of a
+ * rare one. Categories now live behind a single chip that opens a sheet, and
+ * appear only when there is more than one category to choose between.
+ *
+ * Sorting defaults to cost. Someone opening this screen is deciding what to cut.
  */
 
 import React, { useCallback, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, RefreshControl, FlatList } from 'react-native';
+import {
+  View, Text, StyleSheet, RefreshControl, FlatList, Modal, Pressable, ScrollView,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import Animated, { SlideInDown } from 'react-native-reanimated';
 import { parseISO, differenceInCalendarDays, format } from 'date-fns';
 
-import { theme } from '@/src/theme';
+import { theme, CATEGORY_COLORS } from '@/src/theme';
 import { useAuth, monthlyEquivalent } from '@/src/auth-context';
 import {
-  Badge, BrandAvatar, Chip, EmptyState, IconButton, SearchField, formatMoney,
+  Badge, BrandAvatar, Button, EmptyState, IconButton, SearchField, Segmented, formatMoney,
 } from '@/src/ui';
 import { Press, Skeleton } from '@/src/motion';
 import { convertToPrimary, fmtMoney, useExchangeRate } from '@/src/currency';
@@ -39,12 +47,6 @@ type Sort = 'cost' | 'soon' | 'name';
 /** Hoisted so FlatList sees a stable component and does not remount separators. */
 const separator = () => <View style={{ height: 10 }} />;
 
-const SORTS: { value: Sort; label: string; icon: keyof typeof Ionicons.glyphMap }[] = [
-  { value: 'cost', label: 'Costliest', icon: 'trending-down' },
-  { value: 'soon', label: 'Due soon', icon: 'time' },
-  { value: 'name', label: 'A–Z', icon: 'text' },
-];
-
 export default function SubscriptionsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -53,36 +55,32 @@ export default function SubscriptionsScreen() {
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('All');
   const [sort, setSort] = useState<Sort>('cost');
-  const [showPaused, setShowPaused] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [picking, setPicking] = useState(false);
 
   const primary = (user?.primary_currency || 'INR').toUpperCase();
   const rate = useExchangeRate();
 
   const categories = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const s of subs) counts[s.category] = (counts[s.category] ?? 0) + 1;
-    return [
-      { key: 'All', count: subs.length },
-      ...Object.entries(counts)
-        .sort((a, b) => b[1] - a[1])
-        .map(([key, count]) => ({ key, count })),
-    ];
+    for (const x of subs) counts[x.category] = (counts[x.category] ?? 0) + 1;
+    return Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .map(([key, count]) => ({ key, count }));
   }, [subs]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
 
-    const list = subs.filter((s) => {
-      if (category !== 'All' && s.category !== category) return false;
-      if (!showPaused && s.status !== 'active') return false;
+    const list = subs.filter((x) => {
+      if (category !== 'All' && x.category !== category) return false;
       if (q === '') return true;
       // Category is searchable too, so "music" finds Spotify without the user
       // having to know we filed it that way.
       return (
-        s.name.toLowerCase().includes(q) ||
-        s.category.toLowerCase().includes(q) ||
-        (s.domain ?? '').toLowerCase().includes(q)
+        x.name.toLowerCase().includes(q) ||
+        x.category.toLowerCase().includes(q) ||
+        (x.domain ?? '').toLowerCase().includes(q)
       );
     });
 
@@ -98,15 +96,18 @@ export default function SubscriptionsScreen() {
     } else {
       sorted.sort((a, b) => a.name.localeCompare(b.name));
     }
-    return sorted;
-  }, [subs, query, category, sort, showPaused, primary, rate]);
 
-  /** What the filtered view costs, so the filter itself answers a question. */
+    // Paused always sinks, whatever the sort. It is still yours, but it is not
+    // costing you anything, so it should never be the first thing you see.
+    return sorted.sort((a, b) => Number(a.status !== 'active') - Number(b.status !== 'active'));
+  }, [subs, query, category, sort, primary, rate]);
+
+  /** What the filtered view costs, so filtering itself answers a question. */
   const shownMonthly = useMemo(
     () =>
       filtered
-        .filter((s) => s.status === 'active')
-        .reduce((sum, s) => sum + convertToPrimary(monthlyEquivalent(s), s.currency, primary, rate), 0),
+        .filter((x) => x.status === 'active')
+        .reduce((sum, x) => sum + convertToPrimary(monthlyEquivalent(x), x.currency, primary, rate), 0),
     [filtered, primary, rate],
   );
 
@@ -119,15 +120,15 @@ export default function SubscriptionsScreen() {
     }
   };
 
-  const pausedCount = subs.filter((x) => x.status !== 'active').length;
-
-  // Stable across renders, so React.memo on Row actually holds. An inline
-  // arrow in renderItem is a new prop every time and would re-render every
-  // visible row on each keystroke in the search field.
+  // Stable across renders, so React.memo on Row actually holds. An inline arrow
+  // in renderItem is a new prop every time and would re-render every visible row
+  // on each keystroke in the search field.
   const openSub = useCallback(
     (id: string) => router.push({ pathname: '/subscription/[id]', params: { id } }),
     [router],
   );
+
+  const filtering = query.trim() !== '' || category !== 'All';
 
   return (
     <View style={{ flex: 1, backgroundColor: theme.color.surface }}>
@@ -136,7 +137,9 @@ export default function SubscriptionsScreen() {
           <View style={{ flex: 1 }}>
             <Text style={s.title}>Subscriptions</Text>
             <Text style={s.subtitle}>
-              {filtered.length} shown · {formatMoney(shownMonthly, primary)}/mo
+              {subsLoading
+                ? 'Loading…'
+                : `${filtered.length} ${filtered.length === 1 ? 'item' : 'items'} · ${formatMoney(shownMonthly, primary)}/mo`}
             </Text>
           </View>
           <IconButton
@@ -148,60 +151,53 @@ export default function SubscriptionsScreen() {
           />
         </View>
 
-        <View style={{ marginTop: 14 }}>
-          <SearchField
-            value={query}
-            onChange={setQuery}
-            placeholder="Search name, category or site"
-            testID="subs-search"
+        <View style={s.controls}>
+          <View style={{ flex: 1 }}>
+            <SearchField
+              value={query}
+              onChange={setQuery}
+              placeholder="Search"
+              testID="subs-search"
+            />
+          </View>
+          {/* One button for all category filtering, and only when there is more
+              than one category to pick between. */}
+          {categories.length > 1 && (
+            <Press onPress={() => setPicking(true)} scale={0.92} testID="subs-filter">
+              <View style={[s.filterBtn, category !== 'All' && s.filterBtnOn]}>
+                <Ionicons
+                  name="funnel"
+                  size={17}
+                  color={category !== 'All' ? '#FFFFFF' : theme.color.ink}
+                />
+              </View>
+            </Press>
+          )}
+        </View>
+
+        <View style={{ marginTop: 10 }}>
+          <Segmented<Sort>
+            options={[
+              { value: 'cost', label: 'Costliest' },
+              { value: 'soon', label: 'Due soon' },
+              { value: 'name', label: 'A–Z' },
+            ]}
+            value={sort}
+            onChange={setSort}
+            testID="subs-sort"
           />
         </View>
 
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={s.chips}
-          style={{ marginHorizontal: -20, marginTop: 12 }}
-        >
-          {SORTS.map((o) => (
-            <Chip
-              key={o.value}
-              label={o.label}
-              icon={o.icon}
-              active={sort === o.value}
-              onPress={() => setSort(o.value)}
-              testID={`sort-${o.value}`}
-            />
-          ))}
-          {pausedCount > 0 && (
-            <Chip
-              label={showPaused ? 'Hiding none' : 'Active only'}
-              icon={showPaused ? 'eye' : 'eye-off'}
-              active={!showPaused}
-              onPress={() => setShowPaused((v) => !v)}
-              testID="toggle-paused"
-            />
-          )}
-        </ScrollView>
-
-        {categories.length > 2 && (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={s.chips}
-            style={{ marginHorizontal: -20, marginTop: 8 }}
-          >
-            {categories.map((c) => (
-              <Chip
-                key={c.key}
-                label={c.key}
-                count={c.key === 'All' ? undefined : c.count}
-                active={category === c.key}
-                onPress={() => setCategory(c.key)}
-                testID={`filter-${c.key}`}
+        {category !== 'All' && (
+          <Press onPress={() => setCategory('All')} scale={0.96} testID="subs-clear-filter">
+            <View style={s.activeFilter}>
+              <View
+                style={[s.filterDot, { backgroundColor: CATEGORY_COLORS[category] ?? theme.color.brand }]}
               />
-            ))}
-          </ScrollView>
+              <Text style={s.activeFilterText}>{category}</Text>
+              <Ionicons name="close-circle" size={15} color={theme.color.inkMuted} />
+            </View>
+          </Press>
         )}
       </View>
 
@@ -223,6 +219,7 @@ export default function SubscriptionsScreen() {
         maxToRenderPerBatch={5}
         windowSize={7}
         removeClippedSubviews
+        keyboardShouldPersistTaps="handled"
         // No entrance animation on rows. FlatList recycles them, so a mount
         // animation re-fires every time a row is reused — the list appeared to
         // stutter and flash precisely while being scrolled, which is the one
@@ -231,26 +228,29 @@ export default function SubscriptionsScreen() {
           <Row sub={item} primary={primary} rate={rate} onPress={openSub} />
         )}
         ListEmptyComponent={
-          // Placeholder rows while the first fetch is in flight. Showing
-          // "no subscriptions yet" to someone who has thirty is the worst
-          // possible guess to make on a slow connection.
+          // Placeholder rows while the first fetch is in flight. Showing "no
+          // subscriptions yet" to someone who has thirty is the worst possible
+          // guess to make on a slow connection.
           subsLoading ? (
             <View style={{ gap: 10 }} testID="subs-loading">
               {[0, 1, 2, 3, 4].map((i) => (
                 <Skeleton key={i} width="100%" height={78} radius={theme.radius.lg} />
               ))}
             </View>
-          ) : query.trim() !== '' || category !== 'All' ? (
+          ) : filtering ? (
             <EmptyState
               icon="search"
               tone="neutral"
               title="Nothing matches"
-              body={`No subscription matches ${query.trim() !== '' ? `"${query.trim()}"` : `the ${category} filter`}.`}
-              actionLabel="Clear filters"
+              body={
+                query.trim() !== ''
+                  ? `No subscription matches "${query.trim()}".`
+                  : `Nothing filed under ${category}.`
+              }
+              actionLabel="Clear"
               onAction={() => {
                 setQuery('');
                 setCategory('All');
-                setShowPaused(true);
               }}
               testID="subs-no-match"
             />
@@ -266,7 +266,71 @@ export default function SubscriptionsScreen() {
           )
         }
       />
+
+      <CategorySheet
+        visible={picking}
+        categories={categories}
+        total={subs.length}
+        selected={category}
+        onClose={() => setPicking(false)}
+        onPick={(c) => {
+          setCategory(c);
+          setPicking(false);
+        }}
+      />
     </View>
+  );
+}
+
+/** Category filtering, out of the way until asked for. */
+function CategorySheet({
+  visible, categories, total, selected, onClose, onPick,
+}: {
+  visible: boolean;
+  categories: { key: string; count: number }[];
+  total: number;
+  selected: string;
+  onClose: () => void;
+  onPick: (c: string) => void;
+}) {
+  const insets = useSafeAreaInsets();
+
+  const rows = [{ key: 'All', count: total }, ...categories];
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent>
+      <Pressable style={sheet.backdrop} onPress={onClose} testID="cat-backdrop" />
+      <Animated.View
+        entering={SlideInDown.duration(280)}
+        style={[sheet.wrap, { paddingBottom: insets.bottom + 16 }]}
+      >
+        <View style={sheet.grabber} />
+        <Text style={sheet.title}>Filter by category</Text>
+
+        <ScrollView style={{ maxHeight: 360 }} showsVerticalScrollIndicator={false}>
+          {rows.map((r) => {
+            const on = r.key === selected;
+            return (
+              <Press key={r.key} onPress={() => onPick(r.key)} scale={0.98} testID={`cat-${r.key}`}>
+                <View style={sheet.row}>
+                  <View
+                    style={[
+                      sheet.dot,
+                      { backgroundColor: r.key === 'All' ? theme.color.inkMuted : CATEGORY_COLORS[r.key] ?? theme.color.brand },
+                    ]}
+                  />
+                  <Text style={[sheet.label, on && { fontWeight: '800' }]}>{r.key}</Text>
+                  <Text style={sheet.count}>{r.count}</Text>
+                  {on && <Ionicons name="checkmark" size={18} color={theme.color.brandPrimary} />}
+                </View>
+              </Press>
+            );
+          })}
+        </ScrollView>
+
+        <Button label="Close" variant="ghost" onPress={onClose} size="md" style={{ marginTop: 10 }} />
+      </Animated.View>
+    </Modal>
   );
 }
 
@@ -282,10 +346,15 @@ const Row = React.memo(function Row({
   const paused = sub.status !== 'active';
   const monthly = monthlyEquivalent(sub);
   const soon = !paused && days >= 0 && days <= 7;
+  const colour = CATEGORY_COLORS[sub.category] ?? theme.color.brand;
 
   return (
     <Press onPress={() => onPress(sub.id)} scale={0.985} testID={`sub-row-${sub.name}`}>
-      <View style={[s.row, paused && { opacity: 0.55 }]}>
+      <View style={[s.row, paused && s.rowPaused]}>
+        {/* A category stripe. It costs four pixels and makes the list scannable
+            by kind without a word of text. */}
+        <View style={[s.stripe, { backgroundColor: paused ? theme.color.border : colour }]} />
+
         <BrandAvatar sub={sub} size={46} />
 
         <View style={{ flex: 1, gap: 3 }}>
@@ -307,9 +376,7 @@ const Row = React.memo(function Row({
 
         <View style={{ alignItems: 'flex-end' }}>
           <Text style={s.amount}>{formatMoney(sub.amount, sub.currency)}</Text>
-          <Text style={s.cycle}>
-            per {CYCLE_SHORT[sub.billing_cycle] ?? sub.billing_cycle}
-          </Text>
+          <Text style={s.cycle}>per {CYCLE_SHORT[sub.billing_cycle] ?? sub.billing_cycle}</Text>
           {/* The comparable number. Without it a yearly plan looks cheap next to
               a monthly one purely because it is charged less often. */}
           {sub.billing_cycle !== 'monthly' && (
@@ -330,18 +397,59 @@ const s = StyleSheet.create({
   headRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   title: { ...theme.type.title1, color: theme.color.ink },
   subtitle: { ...theme.type.small, color: theme.color.inkMuted, marginTop: 2 },
-  chips: { gap: 8, paddingHorizontal: 20, alignItems: 'center' },
+
+  controls: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 14 },
+  filterBtn: {
+    width: 48, height: 48, borderRadius: 24,
+    backgroundColor: theme.color.raised,
+    alignItems: 'center', justifyContent: 'center',
+    ...theme.shadow.sm,
+  },
+  filterBtnOn: { backgroundColor: theme.color.brandPrimary },
+
+  activeFilter: {
+    alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 7,
+    marginTop: 10, paddingHorizontal: 12, paddingVertical: 7,
+    borderRadius: theme.radius.pill, backgroundColor: theme.color.surfaceSecondary,
+  },
+  filterDot: { width: 8, height: 8, borderRadius: 4 },
+  activeFilterText: { ...theme.type.caption, color: theme.color.ink, fontWeight: '700' },
 
   row: {
     flexDirection: 'row', alignItems: 'center', gap: 13,
     backgroundColor: theme.color.raised,
-    borderRadius: theme.radius.lg, padding: 14,
+    borderRadius: theme.radius.lg, padding: 14, paddingLeft: 18,
+    overflow: 'hidden',
     ...theme.shadow.sm,
   },
+  rowPaused: { opacity: 0.6 },
+  stripe: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 5 },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   name: { ...theme.type.bodyStrong, color: theme.color.ink, fontSize: 15.5, flexShrink: 1 },
   meta: { ...theme.type.caption, color: theme.color.inkMuted },
   amount: { fontSize: 17, fontWeight: '800', color: theme.color.ink, letterSpacing: -0.5 },
   cycle: { ...theme.type.caption, color: theme.color.inkMuted, fontSize: 10.5 },
   monthly: { color: theme.color.brandSecondary, fontSize: 10.5, fontWeight: '700', marginTop: 2 },
+});
+
+const sheet = StyleSheet.create({
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(20,16,14,0.5)' },
+  wrap: {
+    position: 'absolute', left: 0, right: 0, bottom: 0,
+    backgroundColor: theme.color.surface,
+    borderTopLeftRadius: 30, borderTopRightRadius: 30,
+    paddingHorizontal: 20, paddingTop: 12,
+  },
+  grabber: {
+    alignSelf: 'center', width: 40, height: 4, borderRadius: 2,
+    backgroundColor: theme.color.border, marginBottom: 14,
+  },
+  title: { ...theme.type.title3, color: theme.color.ink, marginBottom: 6 },
+  row: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: theme.color.border,
+  },
+  dot: { width: 10, height: 10, borderRadius: 5 },
+  label: { ...theme.type.body, color: theme.color.ink, fontWeight: '600', flex: 1 },
+  count: { ...theme.type.caption, color: theme.color.inkMuted, fontWeight: '700' },
 });

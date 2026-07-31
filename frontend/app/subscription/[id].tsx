@@ -1,16 +1,21 @@
 /**
  * Add or edit a subscription.
  *
- * A form for something that costs money should show what it costs while you are
- * typing it, so the card at the top is live: the logo resolves from the domain,
- * and the figure underneath is the *monthly equivalent*, which is the number the
- * rest of the app will use. Somebody entering ₹1,490 a year finds out here that
- * it is ₹124 a month, rather than discovering the app disagrees with their
- * mental arithmetic three screens later.
+ * Two rules, after the first version of this screen turned into a wall of pills:
  *
- * The order is deliberate: amount first, because it is the only field the user
- * definitely knows and the one they came to type. Name and category follow.
- * Anything optional is below the fold.
+ *   One control per question, and the control matches the question. A date gets
+ *   a calendar, a choice of three gets a segment, a choice of ten gets a grid.
+ *   The version this replaced asked for a renewal date with "+7d / +14d / −1d"
+ *   buttons, which is arithmetic homework dressed as an input.
+ *
+ *   Show the consequence next to the input. The card at the top is live — logo,
+ *   name, and the *monthly equivalent* of whatever has been typed — so someone
+ *   entering Rs 1,490 a year learns here that it is Rs 124 a month, rather than
+ *   finding out three screens later that the app disagrees with their mental
+ *   arithmetic.
+ *
+ * Order is by how sure the user is: the amount they came to type, then the name,
+ * then everything optional.
  */
 
 import React, { useMemo, useState } from 'react';
@@ -28,11 +33,12 @@ import { useAuth } from '@/src/auth-context';
 import {
   createSubscription, deleteSubscription, toggleSubscription, updateSubscription,
 } from '@/src/api';
-import { BrandAvatar, Button, Chip, Field, IconButton, Segmented } from '@/src/ui';
+import { BrandAvatar, Button, Field, IconButton, Segmented } from '@/src/ui';
 import { Press, Reveal } from '@/src/motion';
+import { DateSheet } from '@/src/date-sheet';
 import { CURRENCIES, fmtMoney, symbolFor } from '@/src/currency';
 import { monthlyEquivalent } from '@/src/cycles';
-import { addDaysISO, parseISODate, shiftISODate } from '@/src/dates';
+import { addDaysISO, parseISODate } from '@/src/dates';
 
 type Cycle = 'weekly' | 'monthly' | 'yearly';
 
@@ -40,6 +46,36 @@ type Cycle = 'weekly' | 'monthly' | 'yearly';
 function prettyDate(iso: string): string {
   const d = parseISODate(iso);
   return d ? format(d, 'EEE, d MMM yyyy') : iso;
+}
+
+/** A labelled row that opens something. Used for both dates. */
+function PickerRow({
+  icon, label, value, onPress, tone, testID,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  value: string;
+  onPress: () => void;
+  tone?: 'teal';
+  testID?: string;
+}) {
+  const fg = tone === 'teal' ? theme.color.brandSecondary : theme.color.brandPrimary;
+  const bg = tone === 'teal' ? theme.color.brandSecondaryTint : theme.color.brandTint;
+
+  return (
+    <Press onPress={onPress} scale={0.985} testID={testID}>
+      <View style={s.picker}>
+        <View style={[s.pickerIcon, { backgroundColor: bg }]}>
+          <Ionicons name={icon} size={17} color={fg} />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Text style={s.pickerLabel}>{label}</Text>
+          <Text style={s.pickerValue}>{value}</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={17} color={theme.color.inkFaint} />
+      </View>
+    </Press>
+  );
 }
 
 export default function SubscriptionForm() {
@@ -65,9 +101,12 @@ export default function SubscriptionForm() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  const [pickingRenewal, setPickingRenewal] = useState(false);
+  const [pickingTrialEnd, setPickingTrialEnd] = useState(false);
+  const [showMore, setShowMore] = useState(!isNew);
+
   const numeric = Number.parseFloat(amount);
   const valid = Number.isFinite(numeric) && numeric >= 0;
-
   const monthly = useMemo(
     () => (valid ? monthlyEquivalent(numeric, cycle) : 0),
     [valid, numeric, cycle],
@@ -88,12 +127,6 @@ export default function SubscriptionForm() {
     setIsTrial(true);
     setTrialEnds(seed);
     setDate(seed);
-  };
-
-  const setTrialLength = (days: number) => {
-    const end = addDaysISO(new Date(), days);
-    setTrialEnds(end);
-    setDate(end);
   };
 
   const save = async () => {
@@ -188,14 +221,14 @@ export default function SubscriptionForm() {
         style={{ flex: 1 }}
       >
         <ScrollView
-          contentContainerStyle={{ padding: 20, paddingBottom: 180 }}
+          contentContainerStyle={{ padding: 20, paddingBottom: 190 }}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* Live preview. Everything below writes into it as you type, which is
-              what turns a form into an object you are building. */}
+          {/* Live preview. Everything below writes into it, which is what turns
+              a form into an object you are building. */}
           <Reveal>
-            <View style={[s.preview, { borderColor: accent + '30' }]}>
+            <View style={[s.preview, { borderColor: accent + '33' }]}>
               <BrandAvatar sub={{ name: name || 'New', domain: domain || undefined }} size={52} />
               <View style={{ flex: 1 }}>
                 <Text style={s.previewName} numberOfLines={1}>
@@ -208,11 +241,9 @@ export default function SubscriptionForm() {
                 </View>
               </View>
               <View style={{ alignItems: 'flex-end' }}>
-                <Text style={s.previewAmount}>
-                  {valid ? fmtMoney(numeric, currency) : '—'}
-                </Text>
-                {/* The comparable figure, always. It is what every total in the
-                    app is built from, so it should never be a surprise. */}
+                <Text style={s.previewAmount}>{valid ? fmtMoney(numeric, currency) : '—'}</Text>
+                {/* The comparable number. It is what every total in the app is
+                    built from, so it should never be a surprise. */}
                 {valid && cycle !== 'monthly' && (
                   <Animated.Text entering={FadeIn.duration(200)} style={s.previewMonthly}>
                     {fmtMoney(monthly, currency)}/mo
@@ -234,7 +265,11 @@ export default function SubscriptionForm() {
             >
               <View style={s.currency}>
                 <Text style={s.currencySymbol}>{symbolFor(currency)}</Text>
-                <Text style={s.currencyCode}>{currency}</Text>
+                {/* Says what tapping does. Without it this looked like a label. */}
+                <View style={s.currencySwap}>
+                  <Ionicons name="swap-horizontal" size={9} color={theme.color.inkMuted} />
+                  <Text style={s.currencyCode}>{currency}</Text>
+                </View>
               </View>
             </Press>
             <TextInput
@@ -260,7 +295,7 @@ export default function SubscriptionForm() {
             testID="form-cycle"
           />
 
-          <View style={{ height: 20 }} />
+          <View style={{ height: 22 }} />
           <Field
             label="Name"
             value={name}
@@ -270,115 +305,116 @@ export default function SubscriptionForm() {
             testID="form-name"
           />
 
-          <View style={{ height: 16 }} />
-          <Field
-            label="Website (for the logo)"
-            value={domain ?? ''}
-            onChangeText={setDomain}
-            placeholder={name.trim() ? `${name.trim().toLowerCase().replace(/\s+/g, '')}.com` : 'netflix.com'}
-            autoCapitalize="none"
-            testID="form-domain"
-          />
-
           <Text style={s.label}>Category</Text>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ gap: 8, paddingRight: 20 }}
-            style={{ marginHorizontal: -2 }}
-          >
-            {CATEGORIES.map((c) => (
-              <Chip
-                key={c}
-                label={c}
-                active={category === c}
-                onPress={() => setCategory(c)}
-                testID={`form-cat-${c}`}
-              />
-            ))}
-          </ScrollView>
-
-          <Text style={s.label}>Free trial</Text>
-          <Press onPress={toggleTrial} scale={0.99} testID="form-trial-toggle">
-            <View style={[s.trial, isTrial && { borderColor: theme.color.brandSecondary }]}>
-              <View style={[s.check, isTrial && s.checkOn]}>
-                {isTrial && <Ionicons name="checkmark" size={15} color="#FFFFFF" />}
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={s.trialTitle}>I am on a free trial</Text>
-                <Text style={s.trialHint}>
-                  {isTrial
-                    ? 'Kept out of your monthly total until it converts'
-                    : 'You get warned 7 days, 2 days and the morning it ends'}
-                </Text>
-              </View>
-            </View>
-          </Press>
-
-          {isTrial && (
-            <Animated.View layout={LinearTransition} entering={FadeIn.duration(220)}>
-              <View style={s.bumps}>
-                {[7, 14, 30].map((d) => (
-                  <Chip
-                    key={d}
-                    label={`${d} days`}
-                    active={trialEnds === addDaysISO(new Date(), d)}
-                    onPress={() => setTrialLength(d)}
-                    testID={`form-trial-${d}`}
-                  />
-                ))}
-              </View>
-              {trialEnds !== null && (
-                <Text style={s.trialEnds}>
-                  Ends {prettyDate(trialEnds)} — first charge lands that day
-                </Text>
-              )}
-            </Animated.View>
-          )}
-
-          <Text style={s.label}>{isTrial ? 'First charge' : 'Next renewal'}</Text>
-          <View style={s.dateBox}>
-            <Ionicons name="calendar-outline" size={17} color={theme.color.inkMuted} />
-            <Text style={s.dateText}>{prettyDate(date)}</Text>
+          {/* A wrapped grid, not a horizontal scroller. Ten options that scroll
+              sideways hide half of themselves and make you swipe to find out
+              what you were not offered. */}
+          <View style={s.catGrid}>
+            {CATEGORIES.map((c) => {
+              const on = category === c;
+              const colour = CATEGORY_COLORS[c] ?? theme.color.brand;
+              return (
+                <Press
+                  key={c}
+                  onPress={() => setCategory(c)}
+                  scale={0.94}
+                  testID={`form-cat-${c}`}
+                >
+                  <View style={[s.cat, on && { backgroundColor: colour, borderColor: colour }]}>
+                    {!on && <View style={[s.catDot, { backgroundColor: colour }]} />}
+                    <Text style={[s.catText, on && s.catTextOn]}>{c}</Text>
+                  </View>
+                </Press>
+              );
+            })}
           </View>
-          <View style={s.bumps}>
-            {[1, 7, 14, 30].map((d) => (
-              <Chip
-                key={d}
-                label={`+${d}d`}
-                onPress={() => setDate((prev) => shiftISODate(prev, d))}
-                testID={`form-bump-${d}`}
-              />
-            ))}
-            <Chip
-              label="−1d"
-              onPress={() => setDate((prev) => shiftISODate(prev, -1))}
-              testID="form-bump--1"
+
+          <Text style={s.label}>When</Text>
+          <View style={{ gap: 10 }}>
+            <Press onPress={toggleTrial} scale={0.985} testID="form-trial-toggle">
+              <View style={[s.trial, isTrial && s.trialOn]}>
+                <View style={[s.check, isTrial && s.checkOn]}>
+                  {isTrial && <Ionicons name="checkmark" size={15} color="#FFFFFF" />}
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={s.trialTitle}>This is a free trial</Text>
+                  <Text style={s.trialHint}>
+                    {isTrial
+                      ? 'Kept out of your monthly total until it converts'
+                      : 'Warned 7 days, 2 days and the morning it ends'}
+                  </Text>
+                </View>
+              </View>
+            </Press>
+
+            {isTrial && (
+              <Animated.View layout={LinearTransition} entering={FadeIn.duration(200)}>
+                <PickerRow
+                  icon="hourglass"
+                  label="Trial ends"
+                  value={trialEnds !== null ? prettyDate(trialEnds) : 'Pick a date'}
+                  onPress={() => setPickingTrialEnd(true)}
+                  tone="teal"
+                  testID="form-trial-date"
+                />
+              </Animated.View>
+            )}
+
+            <PickerRow
+              icon="calendar"
+              label={isTrial ? 'First charge' : 'Next renewal'}
+              value={prettyDate(date)}
+              onPress={() => setPickingRenewal(true)}
+              testID="form-date"
             />
           </View>
 
-          <Text style={s.label}>Remind me</Text>
-          <View style={s.bumps}>
-            {[1, 3, 7, 14].map((d) => (
-              <Chip
-                key={d}
-                label={`${d} day${d === 1 ? '' : 's'} before`}
-                active={reminderDays === d}
-                onPress={() => setReminderDays(d)}
-                testID={`form-remind-${d}`}
-              />
-            ))}
-          </View>
-
-          <View style={{ height: 20 }} />
-          <Field
-            label="Notes"
-            value={notes ?? ''}
-            onChangeText={setNotes}
-            placeholder="Family plan, shared with…"
-            multiline
-            testID="form-notes"
+          <Text style={s.label}>Remind me before it charges</Text>
+          <Segmented<string>
+            options={[
+              { value: '1', label: '1 day' },
+              { value: '3', label: '3 days' },
+              { value: '7', label: '1 week' },
+              { value: '14', label: '2 weeks' },
+            ]}
+            value={String(reminderDays)}
+            onChange={(v) => setReminderDays(Number(v))}
+            testID="form-remind"
           />
+
+          {/* Folded away for new subscriptions. Neither of these is needed to
+              save one, and a shorter form is a form people finish. */}
+          {!showMore ? (
+            <Press onPress={() => setShowMore(true)} scale={0.97} testID="form-more">
+              <View style={s.more}>
+                <Ionicons name="add-circle-outline" size={17} color={theme.color.inkSoft} />
+                <Text style={s.moreText}>Add a logo or a note</Text>
+              </View>
+            </Press>
+          ) : (
+            <Animated.View entering={FadeIn.duration(200)} layout={LinearTransition}>
+              <View style={{ height: 22 }} />
+              <Field
+                label="Website (for the logo)"
+                value={domain ?? ''}
+                onChangeText={setDomain}
+                placeholder={
+                  name.trim() ? `${name.trim().toLowerCase().replace(/\s+/g, '')}.com` : 'netflix.com'
+                }
+                autoCapitalize="none"
+                testID="form-domain"
+              />
+              <View style={{ height: 16 }} />
+              <Field
+                label="Notes"
+                value={notes ?? ''}
+                onChangeText={setNotes}
+                placeholder="Family plan, shared with…"
+                multiline
+                testID="form-notes"
+              />
+            </Animated.View>
+          )}
 
           {err !== null && (
             <Animated.View entering={FadeIn.duration(200)} style={s.error}>
@@ -398,6 +434,26 @@ export default function SubscriptionForm() {
           />
         </View>
       </KeyboardAvoidingView>
+
+      <DateSheet
+        visible={pickingRenewal}
+        value={date}
+        title={isTrial ? 'First charge' : 'Next renewal'}
+        onClose={() => setPickingRenewal(false)}
+        onPick={setDate}
+      />
+      <DateSheet
+        visible={pickingTrialEnd}
+        value={trialEnds ?? date}
+        title="Trial ends"
+        onClose={() => setPickingTrialEnd(false)}
+        onPick={(iso) => {
+          setTrialEnds(iso);
+          // The first charge is the day the trial converts. Keeping them in step
+          // is the whole reason the trial flag exists.
+          setDate(iso);
+        }}
+      />
     </View>
   );
 }
@@ -427,22 +483,48 @@ const s = StyleSheet.create({
 
   amountRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   currency: {
-    alignItems: 'center', justifyContent: 'center',
-    width: 62, height: 62, borderRadius: theme.radius.md,
+    alignItems: 'center', justifyContent: 'center', gap: 1,
+    width: 66, height: 66, borderRadius: theme.radius.md,
     backgroundColor: theme.color.surfaceSecondary,
   },
   currencySymbol: { color: theme.color.ink, fontSize: 24, fontWeight: '800', lineHeight: 28 },
-  currencyCode: { color: theme.color.inkMuted, fontSize: 9.5, fontWeight: '800', letterSpacing: 0.6 },
+  currencySwap: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  currencyCode: { color: theme.color.inkMuted, fontSize: 9.5, fontWeight: '800', letterSpacing: 0.4 },
   amountInput: {
     flex: 1, fontSize: 46, fontWeight: '800', color: theme.color.ink,
     letterSpacing: -2, padding: 0, includeFontPadding: false,
   },
 
+  catGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  cat: {
+    flexDirection: 'row', alignItems: 'center', gap: 6,
+    height: 38, paddingHorizontal: 14, borderRadius: theme.radius.pill,
+    backgroundColor: theme.color.raised,
+    borderWidth: 1, borderColor: theme.color.border,
+  },
+  catDot: { width: 7, height: 7, borderRadius: 4 },
+  catText: { ...theme.type.small, color: theme.color.inkSoft, fontWeight: '700' },
+  catTextOn: { color: '#FFFFFF' },
+
+  picker: {
+    flexDirection: 'row', alignItems: 'center', gap: 13,
+    backgroundColor: theme.color.raised, borderRadius: theme.radius.md,
+    padding: 14, ...theme.shadow.sm,
+  },
+  pickerIcon: {
+    width: 38, height: 38, borderRadius: 13,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  pickerLabel: { ...theme.type.caption, color: theme.color.inkMuted },
+  pickerValue: { ...theme.type.bodyStrong, color: theme.color.ink, marginTop: 2 },
+
   trial: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
     backgroundColor: theme.color.raised, borderRadius: theme.radius.md,
-    padding: 16, borderWidth: 1.5, borderColor: theme.color.border,
+    padding: 14, borderWidth: 1.5, borderColor: 'transparent',
+    ...theme.shadow.sm,
   },
+  trialOn: { borderColor: theme.color.brandSecondary },
   check: {
     width: 24, height: 24, borderRadius: 8,
     borderWidth: 2, borderColor: theme.color.borderStrong,
@@ -451,18 +533,13 @@ const s = StyleSheet.create({
   checkOn: { backgroundColor: theme.color.brandSecondary, borderColor: theme.color.brandSecondary },
   trialTitle: { ...theme.type.bodyStrong, color: theme.color.ink },
   trialHint: { ...theme.type.caption, color: theme.color.inkMuted, marginTop: 2 },
-  trialEnds: {
-    ...theme.type.small, color: theme.color.brandSecondary, fontWeight: '700', marginTop: 10,
-  },
 
-  dateBox: {
-    flexDirection: 'row', alignItems: 'center', gap: 10,
-    height: 54, borderRadius: theme.radius.md, paddingHorizontal: 16,
-    backgroundColor: theme.color.raised,
-    borderWidth: 1.5, borderColor: theme.color.border,
+  more: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+    marginTop: 26, paddingVertical: 15, borderRadius: theme.radius.md,
+    backgroundColor: theme.color.surfaceSecondary,
   },
-  dateText: { ...theme.type.bodyStrong, color: theme.color.ink },
-  bumps: { flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginTop: 10 },
+  moreText: { ...theme.type.small, color: theme.color.inkSoft, fontWeight: '700' },
 
   error: {
     flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 20,
