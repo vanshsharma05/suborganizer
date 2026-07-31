@@ -551,7 +551,9 @@ export function SectionHeader({
   return (
     <View style={section.row}>
       <Text style={section.title}>{title}</Text>
-      {count !== undefined && <Text style={section.count}>{count}</Text>}
+      {/* A count of nothing is not information. The section under it already
+          says so, in words. */}
+      {count !== undefined && count > 0 && <Text style={section.count}>{count}</Text>}
       <View style={{ flex: 1 }} />
       {action !== undefined && onAction !== undefined && (
         <Press onPress={onAction} scale={0.94}>

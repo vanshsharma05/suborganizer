@@ -234,9 +234,16 @@ export function CountUp({
 
   return (
     <AnimatedTextInput
+      // A number wearing a TextInput, because that is the only node whose
+      // contents can be written from the UI thread. Everything below exists to
+      // stop it behaving like an input: without them Android lets you long-press
+      // the headline figure and offers to cut and paste it.
       editable={false}
-      // Never focusable: it is a number wearing a TextInput because that is the
-      // only node whose contents can be written from the UI thread.
+      selectTextOnFocus={false}
+      contextMenuHidden
+      caretHidden
+      focusable={false}
+      showSoftInputOnFocus={false}
       pointerEvents="none"
       underlineColorAndroid="transparent"
       style={[countStyles.base, style]}

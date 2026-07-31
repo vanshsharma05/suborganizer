@@ -31,7 +31,7 @@ import { useAuth, monthlyEquivalent } from '@/src/auth-context';
 import {
   Badge, BrandAvatar, Card, EmptyState, SectionHeader, formatMoney, formatMoneyRounded,
 } from '@/src/ui';
-import { CountUp, Meter, Press, Pulse, Reveal, Skeleton, useCollapsingHeader } from '@/src/motion';
+import { CountUp, Meter, Press, Reveal, Skeleton, useCollapsingHeader } from '@/src/motion';
 import { convertToPrimary, symbolFor, useExchangeRate } from '@/src/currency';
 import { dismissPriceChange } from '@/src/api';
 import { activeTrials, splitByTrial, trialDaysLeft, trialLabel } from '@/src/trials';
@@ -182,6 +182,20 @@ export default function Dashboard() {
       .sort((a, b) => b.value - a.value);
   }, [charging, primary, rate]);
 
+  /**
+   * The bar and its legend, describing the same thing and adding up to the whole.
+   *
+   * Simply taking the top four would draw a bar that fills its track while
+   * standing for less than the total — the widths would say "this is all of it"
+   * and the number above would disagree. Anything past the top three is folded
+   * into one bucket instead, so the segments always sum to the month.
+   */
+  const topCats = useMemo(() => {
+    if (byCat.length <= 4) return byCat;
+    const rest = byCat.slice(3).reduce((sum, c) => sum + c.value, 0);
+    return [...byCat.slice(0, 3), { key: 'Other', value: rest }];
+  }, [byCat]);
+
   const upcoming = useMemo(
     () =>
       [...charging]
@@ -217,9 +231,13 @@ export default function Dashboard() {
           and the small one for navigation, without compromising either. */}
       <Animated.View
         style={[s.compactBar, { paddingTop: insets.top + 8 }, header.compact]}
-        pointerEvents="box-none"
+        pointerEvents="none"
       >
-        <Text style={s.compactAmount}>{formatMoney(monthly, primary)}</Text>
+        {/* Held back while loading for the same reason as the hero: this bar was
+            confidently showing ₹0 to someone whose list had not arrived. */}
+        <Text style={s.compactAmount}>
+          {subsLoading ? '—' : formatMoney(monthly, primary)}
+        </Text>
         <Text style={s.compactLabel}>per month</Text>
       </Animated.View>
 
@@ -306,11 +324,11 @@ export default function Dashboard() {
               )}
             </View>
 
-            {byCat.length > 1 && (
+            {topCats.length > 1 && (
               <View style={{ marginTop: 18 }}>
-                <SpendBar data={byCat} total={monthly} />
+                <SpendBar data={topCats} total={monthly} />
                 <View style={s.legend}>
-                  {byCat.slice(0, 3).map((c) => (
+                  {topCats.map((c) => (
                     <View key={c.key} style={s.legendItem}>
                       <View
                         style={[s.legendDot, { backgroundColor: CATEGORY_COLORS[c.key] ?? '#FFFFFF' }]}
@@ -351,11 +369,14 @@ export default function Dashboard() {
           <Reveal delay={80} style={s.block} testID="dashboard-trials">
             <Card padded={false}>
               <View style={s.alertHead}>
-                <Pulse>
-                  <View style={[s.alertIcon, { backgroundColor: theme.color.brandSecondary }]}>
-                    <Ionicons name="hourglass" size={17} color="#FFFFFF" />
-                  </View>
-                </Pulse>
+                {/* Not pulsing. An element that throbs forever is the kind of
+                    thing that looks urgent for five seconds and cheap after
+                    that, and it keeps the UI thread awake the whole time Home
+                    is open. The red day-count badge on each row already says
+                    what the pulse was trying to. */}
+                <View style={[s.alertIcon, { backgroundColor: theme.color.brandSecondary }]}>
+                  <Ionicons name="hourglass" size={17} color="#FFFFFF" />
+                </View>
                 <View style={{ flex: 1 }}>
                   <Text style={s.alertTitle}>
                     {trials.length === 1 ? 'Free trial ending' : `${trials.length} free trials ending`}
@@ -470,7 +491,7 @@ export default function Dashboard() {
               colors={theme.color.coralGradient}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
-              style={[s.tool, theme.shadow.brand]}
+              style={s.tool}
             >
               <Ionicons name="add" size={22} color="#FFFFFF" />
               <Text style={s.toolTitle}>Add one</Text>
@@ -491,9 +512,7 @@ export default function Dashboard() {
           <EmptyState
             icon="albums-outline"
             title="Nothing tracked yet"
-            body="Scan your Gmail and we will find what you already pay for — most people are surprised by about a third of it."
-            actionLabel="Scan Gmail"
-            onAction={() => router.push('/scan')}
+            body="Use one of the two buttons above — scanning finds what you already pay for, and most people are surprised by about a third of it."
             testID="dashboard-empty"
           />
         ) : (
@@ -620,11 +639,14 @@ const s = StyleSheet.create({
   },
   retryText: { color: theme.color.onInverse, fontSize: 12.5, fontWeight: '800' },
 
+  // Both tiles share one elevation. They sit side by side and are equally
+  // important, so one casting a heavier shadow than the other just read as
+  // a mistake.
   tool: {
     borderRadius: theme.radius.lg, padding: 16, gap: 2, minHeight: 108,
-    justifyContent: 'flex-end',
+    justifyContent: 'flex-end', ...theme.shadow.md,
   },
-  toolDark: { backgroundColor: theme.color.inverse, ...theme.shadow.md },
+  toolDark: { backgroundColor: theme.color.inverse },
   toolTitle: { color: '#FFFFFF', fontSize: 15, fontWeight: '800', letterSpacing: -0.3, marginTop: 8 },
   toolSub: { color: 'rgba(255,255,255,0.75)', fontSize: 11.5, fontWeight: '600' },
 
