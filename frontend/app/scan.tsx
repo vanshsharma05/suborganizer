@@ -35,6 +35,9 @@ import {
 } from '@/src/gmail';
 import { CATEGORY_COLORS, theme } from '@/src/theme';
 import { BrandAvatar } from '@/src/ui';
+import { PRODUCTS } from '@/src/entitlements';
+import { usePurchases } from '@/src/purchases';
+import { UpgradeSheet } from '@/src/paywall';
 
 type Phase = 'idle' | 'connecting' | 'scanning' | 'results' | 'importing';
 
@@ -55,8 +58,8 @@ const EVENT_STYLE: Record<EventKind, { icon: keyof typeof Ionicons.glyphMap; col
 };
 
 const CONFIDENCE_STYLE = {
-  high: { bg: '#DCFCE7', fg: '#047857', label: 'Confident' },
-  medium: { bg: '#FEF3C7', fg: '#B45309', label: 'Likely' },
+  high: { bg: theme.color.successTint, fg: theme.color.success, label: 'Confident' },
+  medium: { bg: theme.color.warningTint, fg: theme.color.warning, label: 'Likely' },
   low: { bg: theme.color.surfaceSecondary, fg: theme.color.inkMuted, label: 'Unsure' },
 } as const;
 
@@ -64,6 +67,7 @@ export default function ScanScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { subs, refreshSubs } = useAuth();
+  const { canScan } = usePurchases();
 
   const unavailable = useMemo(() => gmailUnavailableReason(), []);
   const configured = unavailable === null;
@@ -76,6 +80,7 @@ export default function ScanScreen() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [showUnsure, setShowUnsure] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [unlocking, setUnlocking] = useState(false);
 
   // Mutated rather than replaced so the running scan sees the change.
   const abortRef = useRef<{ cancelled: boolean }>({ cancelled: false });
@@ -153,6 +158,22 @@ export default function ScanScreen() {
       }
       setError(e instanceof Error ? e.message : 'The scan failed');
     }
+  };
+
+  /**
+   * The gate, in one place.
+   *
+   * Connecting Gmail stays free, so the user grants access and sees the app is
+   * real before being asked for anything. The charge sits on the scan itself,
+   * which is the step that costs us API quota and the step whose value they can
+   * already picture.
+   */
+  const startScan = () => {
+    if (!canScan) {
+      setUnlocking(true);
+      return;
+    }
+    void runScan();
   };
 
   const cancelScan = () => {
@@ -252,7 +273,13 @@ export default function ScanScreen() {
         {phase === 'connecting' && <Busy label="Waiting for Google…" />}
 
         {configured && connection && phase === 'idle' && (
-          <ScanSetup depth={depth} onDepth={setDepth} onScan={runScan} lastScan={result?.scannedAt} />
+          <ScanSetup
+            depth={depth}
+            onDepth={setDepth}
+            onScan={startScan}
+            lastScan={result?.scannedAt}
+            locked={!canScan}
+          />
         )}
 
         {phase === 'scanning' && <Progress progress={progress} onCancel={cancelScan} />}
@@ -353,7 +380,7 @@ export default function ScanScreen() {
               </View>
             )}
 
-            <Pressable onPress={runScan} style={s.rescanBtn} testID="scan-again">
+            <Pressable onPress={startScan} style={s.rescanBtn} testID="scan-again">
               <Ionicons name="refresh" size={16} color={theme.color.inkSoft} />
               <Text style={s.rescanText}>Scan again</Text>
             </Pressable>
@@ -389,6 +416,15 @@ export default function ScanScreen() {
           </Pressable>
         </View>
       )}
+
+      <UpgradeSheet
+        product={PRODUCTS.scan}
+        visible={unlocking}
+        onClose={() => setUnlocking(false)}
+        // Straight into the scan they just paid for, rather than returning them
+        // to the button they already pressed.
+        onPurchased={() => void runScan()}
+      />
     </View>
   );
 }
@@ -455,11 +491,14 @@ function ScanSetup({
   onDepth,
   onScan,
   lastScan,
+  locked,
 }: {
   depth: ScanDepth;
   onDepth: (d: ScanDepth) => void;
   onScan: () => void;
   lastScan?: number;
+  /** True until the scan has been paid for. Changes the label, not the flow. */
+  locked: boolean;
 }) {
   return (
     <Animated.View entering={FadeInDown.duration(400)} style={s.card} testID="scan-setup">
@@ -469,7 +508,7 @@ function ScanSetup({
           active={depth === 'quick'}
           onPress={() => onDepth('quick')}
           title="Quick"
-          detail="Last 12 months · ~250 emails"
+          detail="Last 15 months · ~300 emails"
         />
         <DepthOption
           active={depth === 'deep'}
@@ -493,8 +532,10 @@ function ScanSetup({
           end={{ x: 1, y: 1 }}
           style={s.primaryInner}
         >
-          <Ionicons name="search" size={17} color="#FFFFFF" />
-          <Text style={s.primaryText}>Start scan</Text>
+          <Ionicons name={locked ? 'lock-closed' : 'search'} size={17} color="#FFFFFF" />
+          {/* No price on the button. The store owns that number, and this label
+              renders long before the store has answered. */}
+          <Text style={s.primaryText}>{locked ? 'Unlock the scan' : 'Start scan'}</Text>
         </LinearGradient>
       </Pressable>
     </Animated.View>
@@ -758,10 +799,8 @@ const s = StyleSheet.create({
   backBtn: {
     width: 38,
     height: 38,
-    borderRadius: 13,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: theme.color.border,
+    borderRadius: theme.radius.md,
+    backgroundColor: theme.color.raised,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -769,7 +808,6 @@ const s = StyleSheet.create({
   subtitle: { color: theme.color.inkSoft, fontSize: 12, marginTop: 1 },
   linkBtn: { paddingHorizontal: 10, paddingVertical: 8 },
   linkText: { color: theme.color.brandSecondary, fontSize: 13, fontWeight: '700' },
-
   errorBox: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -777,28 +815,24 @@ const s = StyleSheet.create({
     marginHorizontal: 20,
     marginBottom: 12,
     padding: 14,
-    borderRadius: 18,
-    backgroundColor: '#FEF2F2',
-    borderWidth: 1,
-    borderColor: '#FECACA',
+    borderRadius: theme.radius.md,
+    backgroundColor: theme.color.errorTint,
   },
-  errorText: { flex: 1, color: '#991B1B', fontSize: 12.5, lineHeight: 18 },
-
+  errorText: { flex: 1, color: theme.color.error, fontSize: 12.5, lineHeight: 18 },
   card: {
+    ...theme.shadow.sm,
     marginHorizontal: 20,
     padding: 22,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: theme.color.border,
+    backgroundColor: theme.color.raised,
+    borderRadius: theme.radius.lg,
     alignItems: 'center',
     gap: 12,
   },
   iconCircle: {
     width: 52,
     height: 52,
-    borderRadius: 18,
-    backgroundColor: theme.color.brandTertiary,
+    borderRadius: theme.radius.md,
+    backgroundColor: theme.color.brandTint,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -816,11 +850,9 @@ const s = StyleSheet.create({
     textAlign: 'center',
   },
   cardHint: { color: theme.color.inkMuted, fontSize: 11.5, textAlign: 'center' },
-
   bullets: { alignSelf: 'stretch', gap: 10, marginTop: 4 },
   bulletRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   bulletText: { flex: 1, color: theme.color.inkSoft, fontSize: 12.5, lineHeight: 18 },
-
   primaryBtn: { alignSelf: 'stretch', borderRadius: theme.radius.pill, overflow: 'hidden', marginTop: 6 },
   primaryInner: {
     flexDirection: 'row',
@@ -830,21 +862,18 @@ const s = StyleSheet.create({
     height: 52,
   },
   primaryText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
-
   depthRow: { flexDirection: 'row', gap: 10, alignSelf: 'stretch' },
   depthOption: {
+    ...theme.shadow.sm,
     flex: 1,
     padding: 14,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: theme.color.border,
+    borderRadius: theme.radius.md,
     backgroundColor: theme.color.surface,
     gap: 3,
   },
   depthOptionActive: { backgroundColor: theme.color.ink, borderColor: theme.color.ink },
   depthTitle: { color: theme.color.ink, fontSize: 14, fontWeight: '700' },
   depthDetail: { color: theme.color.inkMuted, fontSize: 11 },
-
   barTrack: {
     alignSelf: 'stretch',
     height: 6,
@@ -853,21 +882,18 @@ const s = StyleSheet.create({
     overflow: 'hidden',
   },
   barFill: { height: 6, borderRadius: 3, backgroundColor: theme.color.brandPrimary },
-
   summaryRow: { flexDirection: 'row', gap: 8, paddingHorizontal: 20, marginBottom: 4 },
   summaryTile: {
+    ...theme.shadow.sm,
     flex: 1,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: theme.color.border,
+    backgroundColor: theme.color.raised,
+    borderRadius: theme.radius.md,
     paddingVertical: 12,
     paddingHorizontal: 8,
     alignItems: 'center',
   },
   summaryValue: { color: theme.color.ink, fontSize: 19, fontWeight: '800', letterSpacing: -0.5 },
   summaryLabel: { color: theme.color.inkMuted, fontSize: 9.5, fontWeight: '600', textAlign: 'center', marginTop: 2 },
-
   section: { marginTop: 24, gap: 10 },
   sectionTitle: {
     color: theme.color.ink,
@@ -882,15 +908,18 @@ const s = StyleSheet.create({
     paddingHorizontal: 20,
     marginTop: -6,
   },
-
   candidate: {
     marginHorizontal: 20,
     padding: 14,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: theme.color.border,
+    backgroundColor: theme.color.raised,
+    borderRadius: theme.radius.lg,
     gap: 10,
+    // Transparent rather than absent, so ticking a row changes the colour
+    // without changing the size — a border appearing on selection shifts every
+    // row below it by two pixels.
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+    ...theme.shadow.sm,
   },
   candidateSelected: { borderColor: theme.color.brandPrimary, backgroundColor: '#FFFCFA' },
   candidateTop: { flexDirection: 'row', alignItems: 'center', gap: 11 },
@@ -909,7 +938,6 @@ const s = StyleSheet.create({
   candidateMeta: { color: theme.color.inkSoft, fontSize: 12, marginTop: 2 },
   badge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: theme.radius.pill },
   badgeText: { fontSize: 9.5, fontWeight: '800', letterSpacing: 0.3, textTransform: 'uppercase' },
-
   flagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   flag: {
     flexDirection: 'row',
@@ -922,7 +950,6 @@ const s = StyleSheet.create({
     maxWidth: '100%',
   },
   flagText: { fontSize: 10.5, fontWeight: '700', flexShrink: 1 },
-
   expandBox: {
     borderTopWidth: 1,
     borderTopColor: theme.color.border,
@@ -931,7 +958,7 @@ const s = StyleSheet.create({
   },
   reasonBox: {
     backgroundColor: theme.color.surfaceSecondary,
-    borderRadius: 14,
+    borderRadius: theme.radius.md,
     padding: 11,
     gap: 3,
   },
@@ -946,7 +973,6 @@ const s = StyleSheet.create({
   eventRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 9 },
   eventSubject: { color: theme.color.ink, fontSize: 12.5, fontWeight: '600', lineHeight: 17 },
   eventMeta: { color: theme.color.inkMuted, fontSize: 10.5, marginTop: 1 },
-
   trackedWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingHorizontal: 20 },
   trackedChip: {
     flexDirection: 'row',
@@ -955,16 +981,12 @@ const s = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: theme.radius.pill,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 1,
-    borderColor: theme.color.border,
+    backgroundColor: theme.color.raised,
   },
   trackedText: { color: theme.color.inkSoft, fontSize: 12, fontWeight: '600' },
-
   emptyBox: { alignItems: 'center', gap: 8, paddingHorizontal: 40, paddingVertical: 32 },
   emptyTitle: { color: theme.color.ink, fontSize: 15, fontWeight: '700' },
   emptyText: { color: theme.color.inkSoft, fontSize: 12.5, textAlign: 'center', lineHeight: 18 },
-
   rescanBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -976,10 +998,9 @@ const s = StyleSheet.create({
   rescanText: { color: theme.color.inkSoft, fontSize: 13, fontWeight: '600' },
   revealBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7,
-    marginHorizontal: 20, paddingVertical: 13, borderRadius: 16,
-    borderWidth: 1, borderColor: theme.color.border, borderStyle: 'dashed',
+    marginHorizontal: 20, paddingVertical: 13, borderRadius: theme.radius.md,
+     borderStyle: 'dashed',
   },
-
   footer: {
     position: 'absolute',
     left: 0,

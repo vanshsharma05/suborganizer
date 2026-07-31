@@ -13,7 +13,9 @@
  * actually use subscriptions — quit in April, come back in September.
  */
 
-import { advanceRenewal, Subscription } from '../api';
+import { Subscription } from '../api';
+import { advanceRenewal } from '../cycles';
+import { toISODate, todayISO } from '../dates';
 import { getGmailAccessToken } from './auth';
 import { fetchBodies, fetchHeaders, GmailHeaders, searchMessageIds } from './client';
 import {
@@ -520,8 +522,8 @@ const CYCLE_ADVERB: Record<Cycle, string> = {
 
 /** Step the last known payment forward by whole cycles until it is in the future. */
 function projectNextRenewal(fromMs: number, cycle: Cycle): string {
-  let iso = new Date(fromMs).toISOString().slice(0, 10);
-  const today = new Date().toISOString().slice(0, 10);
+  let iso = toISODate(new Date(fromMs));
+  const today = todayISO();
 
   // ISO dates compare correctly as strings; the guard stops a runaway loop on a
   // nonsense timestamp.

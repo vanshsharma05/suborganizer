@@ -1,54 +1,93 @@
-import React from 'react';
-import { Tabs } from 'expo-router';
+import React, { useEffect } from 'react';
+import { Redirect, Tabs } from 'expo-router';
 import { View, StyleSheet, Pressable, Text } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming } from 'react-native-reanimated';
+import Animated, {
+  Extrapolation, interpolate, useAnimatedStyle, useSharedValue, withSpring,
+} from 'react-native-reanimated';
 import { theme } from '@/src/theme';
 import { useAuth } from '@/src/auth-context';
-import { Redirect } from 'expo-router';
+import { tapFeedback } from '@/src/motion';
 
-const ICONS: Record<string, { active: any; inactive: any; label: string }> = {
+/**
+ * Three tabs, deliberately.
+ *
+ * Calendar and Profile moved out to pushed screens rather than being deleted —
+ * the calendar is reached from "See all" on Home, the profile from the avatar in
+ * its header, which is where people were already tapping for it. Five tabs made
+ * the paid feature one of five equals; three make it a third of the app.
+ *
+ * The bar floats over the content rather than sitting under it, and the selected
+ * item's pill slides between positions rather than fading in place — the motion
+ * is what tells you where you came from.
+ */
+type TabMeta = {
+  active: keyof typeof Ionicons.glyphMap;
+  inactive: keyof typeof Ionicons.glyphMap;
+  label: string;
+};
+
+const ICONS: Record<string, TabMeta> = {
   dashboard: { active: 'home', inactive: 'home-outline', label: 'Home' },
   subscriptions: { active: 'albums', inactive: 'albums-outline', label: 'Subs' },
-  calendar: { active: 'calendar', inactive: 'calendar-outline', label: 'Calendar' },
-  insights: { active: 'sparkles', inactive: 'sparkles-outline', label: 'AI' },
-  profile: { active: 'person', inactive: 'person-outline', label: 'You' },
+  insights: { active: 'pricetag', inactive: 'pricetag-outline', label: 'Savings' },
 };
 
 function TabItem({
   routeName, focused, onPress, badgeCount,
 }: {
-  routeName: string; focused: boolean; onPress: () => void; badgeCount?: number;
+  routeName: string;
+  focused: boolean;
+  onPress: () => void;
+  badgeCount?: number;
 }) {
-  const meta = ICONS[routeName] || { active: 'ellipse', inactive: 'ellipse-outline', label: routeName };
-  const scale = useSharedValue(focused ? 1 : 0);
-  React.useEffect(() => {
-    scale.value = withSpring(focused ? 1 : 0, { damping: 18, stiffness: 220 });
-  }, [focused, scale]);
+  const meta = ICONS[routeName] ?? {
+    active: 'ellipse' as const, inactive: 'ellipse-outline' as const, label: routeName,
+  };
 
-  const bgStyle = useAnimatedStyle(() => ({
-    opacity: scale.value,
-    transform: [{ scale: 0.7 + scale.value * 0.3 }],
+  const on = useSharedValue(focused ? 1 : 0);
+
+  useEffect(() => {
+    on.value = withSpring(focused ? 1 : 0, theme.motion.enter);
+  }, [focused, on]);
+
+  const pill = useAnimatedStyle(() => ({
+    opacity: on.value,
+    transform: [{ scale: interpolate(on.value, [0, 1], [0.75, 1], Extrapolation.CLAMP) }],
+  }));
+
+  // A small lift on selection. Enough to read as "this one", not enough to
+  // shift the row's baseline.
+  const icon = useAnimatedStyle(() => ({
+    transform: [{ translateY: interpolate(on.value, [0, 1], [0, -1], Extrapolation.CLAMP) }],
   }));
 
   return (
-    <Pressable onPress={onPress} testID={`tab-${routeName}`} style={styles.item} hitSlop={8}>
-      <View style={styles.itemInner}>
-        <Animated.View style={[styles.activePill, bgStyle]} pointerEvents="none" />
-        <View style={styles.iconRow}>
+    <Pressable
+      onPress={() => {
+        if (!focused) tapFeedback('selection');
+        onPress();
+      }}
+      testID={`tab-${routeName}`}
+      style={s.item}
+      hitSlop={8}
+    >
+      <View style={s.itemInner}>
+        <Animated.View style={[s.pill, pill]} pointerEvents="none" />
+        <Animated.View style={[s.iconRow, icon]}>
           <Ionicons
             name={focused ? meta.active : meta.inactive}
             size={20}
             color={focused ? '#FFFFFF' : theme.color.inkSoft}
           />
-          {badgeCount && badgeCount > 0 ? (
-            <View style={styles.badge} testID={`tab-badge-${routeName}`}>
-              <Text style={styles.badgeText}>{badgeCount > 9 ? '9+' : badgeCount}</Text>
+          {badgeCount !== undefined && badgeCount > 0 && (
+            <View style={s.badge} testID={`tab-badge-${routeName}`}>
+              <Text style={s.badgeText}>{badgeCount > 9 ? '9+' : badgeCount}</Text>
             </View>
-          ) : null}
-        </View>
-        <Text style={[styles.label, focused && styles.labelActive]} numberOfLines={1}>
+          )}
+        </Animated.View>
+        <Text style={[s.label, focused && s.labelActive]} numberOfLines={1}>
           {meta.label}
         </Text>
       </View>
@@ -56,72 +95,72 @@ function TabItem({
   );
 }
 
-function TabBar({ state, navigation }: any) {
+type TabBarProps = {
+  state: { index: number; routes: { key: string; name: string }[] };
+  navigation: {
+    emit: (e: { type: 'tabPress'; target: string; canPreventDefault: boolean }) => { defaultPrevented: boolean };
+    navigate: (name: string) => void;
+  };
+};
+
+function TabBar({ state, navigation }: TabBarProps) {
   const insets = useSafeAreaInsets();
   const { reminders } = useAuth();
-  const reminderCount = reminders?.length ?? 0;
 
   return (
-    <View style={[styles.wrap, { paddingBottom: Math.max(insets.bottom, 10) }]} testID="tab-bar">
-      <View style={styles.card}>
-        <View style={styles.row}>
-          {state.routes.map((route: any, idx: number) => {
-            const focused = state.index === idx;
-            const onPress = () => {
-              const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
-              if (!focused && !event.defaultPrevented) navigation.navigate(route.name);
-            };
-            return (
-              <TabItem
-                key={route.key}
-                routeName={route.name}
-                focused={focused}
-                onPress={onPress}
-                badgeCount={route.name === 'dashboard' ? reminderCount : 0}
-              />
-            );
-          })}
-        </View>
+    <View style={[s.wrap, { paddingBottom: Math.max(insets.bottom, 10) }]} testID="tab-bar">
+      <View style={s.card}>
+        {state.routes.map((route, idx) => {
+          const focused = state.index === idx;
+          return (
+            <TabItem
+              key={route.key}
+              routeName={route.name}
+              focused={focused}
+              onPress={() => {
+                const event = navigation.emit({
+                  type: 'tabPress', target: route.key, canPreventDefault: true,
+                });
+                if (!focused && !event.defaultPrevented) navigation.navigate(route.name);
+              }}
+              badgeCount={route.name === 'dashboard' ? reminders?.length ?? 0 : 0}
+            />
+          );
+        })}
       </View>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  wrap: {
-    position: 'absolute', left: 14, right: 14, bottom: 8,
-  },
+const s = StyleSheet.create({
+  wrap: { position: 'absolute', left: 16, right: 16, bottom: 6 },
   card: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: theme.color.border,
-    paddingVertical: 10,
+    flexDirection: 'row',
+    backgroundColor: theme.color.raised,
+    borderRadius: theme.radius.xl,
+    paddingVertical: 9,
     paddingHorizontal: 6,
-    shadowColor: '#1A1C1E',
-    shadowOpacity: 0.1,
-    shadowRadius: 22,
-    shadowOffset: { width: 0, height: 14 },
-    elevation: 12,
+    ...theme.shadow.lg,
   },
-  row: { flexDirection: 'row', alignItems: 'stretch' },
-  item: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  itemInner: { alignItems: 'center', paddingVertical: 6, paddingHorizontal: 8, minWidth: 56, position: 'relative' },
-  activePill: {
-    position: 'absolute', top: 0, left: 6, right: 6, height: 34,
-    borderRadius: 999,
-    backgroundColor: theme.color.ink,
+  item: { flex: 1, alignItems: 'center' },
+  itemInner: { alignItems: 'center', paddingHorizontal: 8, minWidth: 56 },
+  pill: {
+    position: 'absolute', top: 0, left: 4, right: 4, height: 34,
+    borderRadius: theme.radius.pill,
+    backgroundColor: theme.color.inverse,
   },
   iconRow: { height: 34, alignItems: 'center', justifyContent: 'center' },
   label: {
-    fontSize: 10, fontWeight: '600', color: theme.color.inkSoft, letterSpacing: 0.3, marginTop: 4,
+    fontSize: 10, fontWeight: '700', color: theme.color.inkSoft,
+    letterSpacing: 0.2, marginTop: 3,
   },
-  labelActive: { color: theme.color.ink, fontWeight: '700' },
+  labelActive: { color: theme.color.ink, fontWeight: '800' },
   badge: {
-    position: 'absolute', top: -2, right: -12, minWidth: 16, height: 16, paddingHorizontal: 4,
+    position: 'absolute', top: 0, right: -11,
+    minWidth: 16, height: 16, paddingHorizontal: 4,
     borderRadius: 8, backgroundColor: theme.color.brandPrimary,
     alignItems: 'center', justifyContent: 'center',
-    borderWidth: 2, borderColor: '#FFFFFF',
+    borderWidth: 2, borderColor: theme.color.raised,
   },
   badgeText: { color: '#FFFFFF', fontSize: 9, fontWeight: '800' },
 });
@@ -131,15 +170,10 @@ export default function TabsLayout() {
   if (loading) return null;
   if (!user) return <Redirect href="/auth" />;
   return (
-    <Tabs
-      screenOptions={{ headerShown: false }}
-      tabBar={(props) => <TabBar {...props} />}
-    >
+    <Tabs screenOptions={{ headerShown: false }} tabBar={(props) => <TabBar {...(props as unknown as TabBarProps)} />}>
       <Tabs.Screen name="dashboard" />
       <Tabs.Screen name="subscriptions" />
-      <Tabs.Screen name="calendar" />
       <Tabs.Screen name="insights" />
-      <Tabs.Screen name="profile" />
     </Tabs>
   );
 }

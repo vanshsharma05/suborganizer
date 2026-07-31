@@ -21,7 +21,9 @@ export default function AuthCallback() {
 
   useEffect(() => {
     if (loading) return;
-    router.replace(user ? '/(tabs)/dashboard' : '/auth');
+    // Back through the index route, so the story gate gets its say rather than
+    // being skipped by anyone who happened to sign in with Google.
+    router.replace(user ? '/' : '/auth');
   }, [user, loading, router]);
 
   return (

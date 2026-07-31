@@ -1,298 +1,321 @@
-import React, { useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Pressable, ActivityIndicator, RefreshControl } from 'react-native';
-import { Image } from 'expo-image';
-import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Ionicons from '@expo/vector-icons/Ionicons';
-import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
-import { theme, IMAGES, CATEGORY_COLORS } from '@/src/theme';
-import { useAuth, monthlyEquivalent } from '@/src/auth-context';
-import { formatMoney, formatMoneyRounded } from '@/src/ui';
-import { convertToPrimary, useExchangeRate } from '@/src/currency';
-import { upgradeToPro } from '@/src/api';
+/**
+ * Savings.
+ *
+ * The screen the ₹199 is for. Its whole job is to be believable, so the layout
+ * puts the arithmetic in front of the claim rather than behind it: every finding
+ * shows the sum it came from, in words the user can check against their own
+ * bank statement.
+ *
+ * One finding is always readable in full, chosen by revealAudit as the cheapest
+ * certain one. The locked ones show the money and hide the identity — see
+ * entitlements.ts for why that asymmetry is the offer.
+ */
 
-export default function InsightsScreen() {
+import React, { useMemo, useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, RefreshControl } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
+import Ionicons from '@expo/vector-icons/Ionicons';
+
+import { theme } from '@/src/theme';
+import { useAuth } from '@/src/auth-context';
+import { Badge, BrandAvatar, Card, EmptyState, formatMoney } from '@/src/ui';
+import { CountUp, Press, Reveal, Skeleton } from '@/src/motion';
+import { convertToPrimary, symbolFor, useExchangeRate } from '@/src/currency';
+import { runAudit, type Saving, type SavingConfidence } from '@/src/savings';
+import { LOCKED_LABEL, lockedCount, lockedValue, PRODUCTS, revealAudit } from '@/src/entitlements';
+import { usePurchases } from '@/src/purchases';
+import { UpgradeSheet } from '@/src/paywall';
+
+const CONFIDENCE: Record<SavingConfidence, { label: string; tone: 'success' | 'warning' | 'neutral' }> = {
+  certain: { label: 'Confirmed', tone: 'success' },
+  likely: { label: 'Very likely', tone: 'warning' },
+  check: { label: 'Worth checking', tone: 'neutral' },
+};
+
+const ICON: Record<Saving['kind'], keyof typeof Ionicons.glyphMap> = {
+  'trial-converting': 'hourglass',
+  bundled: 'gift',
+  'annual-switch': 'calendar',
+  'price-rise': 'trending-up',
+  overlap: 'copy',
+  dormant: 'pause-circle',
+};
+
+export default function SavingsScreen() {
   const insets = useSafeAreaInsets();
-  const { user, subs, refreshSubs, refreshUser, setPro } = useAuth();
+  const router = useRouter();
+  const { user, subs, subsLoading, priceChanges, refreshSubs, refreshPriceChanges } = useAuth();
+  const { unlocked } = usePurchases();
+
   const [refreshing, setRefreshing] = useState(false);
   const [upgrading, setUpgrading] = useState(false);
 
-  const isPro = user?.is_pro ?? false;
-  // In the deps below so totals recompute when the live USD rate arrives.
+  const primary = (user?.primary_currency || 'INR').toUpperCase();
   const rate = useExchangeRate();
 
-  // The old backend computed this in GET /insights. With the whole list already
-  // in context there is nothing to fetch — deriving it keeps the numbers in
-  // lockstep with the dashboard, which computes its totals the same way.
-  const data = useMemo(() => {
-    const primary = (user?.primary_currency || 'INR').toUpperCase();
-    const active = subs.filter((s) => s.status === 'active');
+  const audit = useMemo(
+    () =>
+      runAudit(subs, priceChanges, {
+        primaryCurrency: primary,
+        convert: (amount, from, to) => convertToPrimary(amount, from, to, rate),
+      }),
+    [subs, priceChanges, primary, rate],
+  );
 
-    const by_category: Record<string, number> = {};
-    let monthly = 0;
-    let priciest: { name: string; monthly: number } | null = null;
-
-    for (const s of active) {
-      const v = convertToPrimary(monthlyEquivalent(s), s.currency, primary);
-      monthly += v;
-      by_category[s.category] = (by_category[s.category] || 0) + v;
-      if (!priciest || v > priciest.monthly) priciest = { name: s.name, monthly: v };
-    }
-
-    const ranked = Object.entries(by_category).sort(([, a], [, b]) => b - a);
-    const top_category = ranked[0]?.[0] ?? '—';
-    const money = (n: number) => formatMoneyRounded(n, primary);
-
-    const basic_summary = active.length === 0
-      ? 'No active subscriptions yet. Add one to see where your money actually goes.'
-      : `You're spending ${money(monthly)}/month across ${active.length} active `
-        + `${active.length === 1 ? 'subscription' : 'subscriptions'}. `
-        + `Your top category is ${top_category} (${money(by_category[top_category])}/mo).`;
-
-    // Deterministic, data-derived prompts. Genuinely useful, and honest — real
-    // LLM tips need a Supabase Edge Function to hold the API key server-side.
-    const savings_tip = priciest
-      ? `${priciest.name} is your largest line item at ${money(priciest.monthly)}/month — `
-        + `${money(priciest.monthly * 12)} a year. Worth checking if a cheaper tier covers you.`
-      : 'Add a few subscriptions and this will show you where to cut first.';
-
-    const paused = subs.filter((s) => s.status === 'paused').length;
-    const yearlyPlans = active.filter((s) => s.billing_cycle === 'yearly').length;
-    const unused_alert = paused > 0
-      ? `You have ${paused} paused ${paused === 1 ? 'subscription' : 'subscriptions'}. `
-        + 'If you have not missed them, cancel outright so they cannot silently resume.'
-      : yearlyPlans > 0
-        ? `${yearlyPlans} of your plans renew yearly — easy to forget. `
-          + 'Those charges are the ones that catch people out.'
-        : 'Nothing looks dormant right now. Check back after a few renewal cycles.';
-
-    return {
-      primary_currency: primary,
-      monthly_total: monthly,
-      yearly_projected: monthly * 12,
-      top_category,
-      by_category,
-      basic_summary,
-      pro_savings_tip: savings_tip,
-      pro_unused_alert: unused_alert,
-    };
-  }, [subs, user?.primary_currency, rate]);
+  const reveals = useMemo(() => revealAudit(audit.savings, unlocked), [audit.savings, unlocked]);
+  const behindWall = lockedValue(reveals);
+  const stillLocked = lockedCount(reveals);
+  const found = audit.savings.length > 0;
 
   const onRefresh = async () => {
     setRefreshing(true);
     try {
-      await refreshSubs();
+      await Promise.all([refreshSubs(), refreshPriceChanges()]);
     } finally {
       setRefreshing(false);
     }
   };
 
-  const upgrade = async () => {
-    setUpgrading(true);
-    try {
-      await upgradeToPro();
-      setPro(true);
-      await refreshUser();
-    } finally { setUpgrading(false); }
-  };
-
   return (
     <View style={{ flex: 1, backgroundColor: theme.color.surface }}>
       <ScrollView
-        contentContainerStyle={{ paddingTop: insets.top + 20, paddingBottom: insets.bottom + 110 }}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.color.brand} />}
+        contentContainerStyle={{ paddingTop: insets.top + 16, paddingBottom: insets.bottom + 110 }}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.color.brand} />
+        }
         showsVerticalScrollIndicator={false}
+        testID="savings-scroll"
       >
-        <View style={{ paddingHorizontal: 24 }}>
-          <Text style={styles.eyebrow}>AI Insights</Text>
-          <Text style={styles.title}>Understand your{'\n'}spending, effortlessly.</Text>
+        <View style={{ paddingHorizontal: 20 }}>
+          <Text style={s.title}>Savings</Text>
+          <Text style={s.subtitle}>
+            {found
+              ? 'We checked every subscription against cheaper plans, bundles you already pay for, and prices that moved.'
+              : 'Every subscription, checked for money you should not be spending.'}
+          </Text>
         </View>
 
-        {(
-          <>
-            {/* Hero AI card */}
-            <Animated.View entering={FadeInDown.duration(500)} style={styles.aiCardWrap}>
-              <LinearGradient colors={theme.color.coralGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.aiCard}>
-                <View style={styles.aiChip}>
-                  <Ionicons name="sparkles" size={12} color="#FFFFFF" />
-                  <Text style={styles.aiChipText}>AI Summary</Text>
-                </View>
-                <Text style={styles.aiText}>{data.basic_summary}</Text>
-                <View style={styles.aiStats}>
-                  <View style={styles.aiStat}>
-                    <Text style={styles.aiStatVal} numberOfLines={1} adjustsFontSizeToFit>{formatMoneyRounded(data.monthly_total, data.primary_currency)}</Text>
-                    <Text style={styles.aiStatLabel}>Monthly</Text>
-                  </View>
-                  <View style={styles.aiDivider} />
-                  <View style={styles.aiStat}>
-                    <Text style={styles.aiStatVal} numberOfLines={1} adjustsFontSizeToFit>{formatMoneyRounded(data.yearly_projected, data.primary_currency)}</Text>
-                    <Text style={styles.aiStatLabel}>Yearly</Text>
-                  </View>
-                  <View style={styles.aiDivider} />
-                  <View style={styles.aiStat}>
-                    <Text style={styles.aiStatVal} numberOfLines={1}>{data.top_category}</Text>
-                    <Text style={styles.aiStatLabel}>Top category</Text>
-                  </View>
-                </View>
-              </LinearGradient>
-            </Animated.View>
+        <Reveal delay={60} style={s.heroWrap}>
+          <LinearGradient
+            colors={found ? theme.color.coralGradient : theme.color.tealGradient}
+            start={{ x: 0.05, y: 0 }}
+            end={{ x: 0.95, y: 1 }}
+            style={s.hero}
+          >
+            <Text style={s.heroLabel}>{found ? 'Money on the table' : 'Nothing to claim yet'}</Text>
+            <CountUp
+              value={audit.totalAnnual}
+              symbol={symbolFor(primary)}
+              indian={primary === 'INR'}
+              style={s.heroAmount}
+              testID="savings-total"
+            />
+            <Text style={s.heroSub}>
+              {found
+                ? `a year, across ${audit.savings.length} ${audit.savings.length === 1 ? 'thing' : 'things'} worth acting on`
+                : 'Add your subscriptions and we will audit them'}
+            </Text>
 
-            {/* Category bars */}
-            {data.by_category && Object.keys(data.by_category).length > 0 && (
-              <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Where it goes</Text>
-                <View style={styles.categoriesCard}>
-                  {Object.entries(data.by_category)
-                    .sort(([, a], [, b]) => b - a)
-                    .map(([cat, amount], i) => {
-                      const pct = data.monthly_total > 0 ? (amount / data.monthly_total) * 100 : 0;
-                      return (
-                        <Animated.View key={cat} entering={FadeIn.delay(i * 80)} style={styles.barRow}>
-                          <View style={styles.barHeader}>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                              <View style={[styles.catDot, { backgroundColor: CATEGORY_COLORS[cat] || theme.color.brand }]} />
-                              <Text style={styles.barCat}>{cat}</Text>
-                            </View>
-                            <Text style={styles.barAmount}>{formatMoney(amount)}</Text>
-                          </View>
-                          <View style={styles.barTrack}>
-                            <View style={[styles.barFill, { width: `${pct}%`, backgroundColor: CATEGORY_COLORS[cat] || theme.color.brand }]} />
-                          </View>
-                        </Animated.View>
-                      );
-                    })}
-                </View>
+            {audit.certainCount > 0 && (
+              <View style={s.heroChip}>
+                <Ionicons name="shield-checkmark" size={13} color="#FFFFFF" />
+                <Text style={s.heroChipText}>
+                  {audit.certainCount} confirmed by arithmetic, not guesswork
+                </Text>
               </View>
             )}
+          </LinearGradient>
+        </Reveal>
 
-            {/* Pro insights */}
-            <View style={styles.section}>
-              <View style={styles.proHeader}>
-                <Text style={styles.sectionTitle}>Smart tips</Text>
-                {!isPro && (
-                  <View style={styles.proBadge}>
-                    <Ionicons name="lock-closed" size={11} color={theme.color.gold} />
-                    <Text style={styles.proBadgeText}>PRO</Text>
-                  </View>
-                )}
-              </View>
-
-              <View style={styles.proTipsWrap}>
-                <View style={styles.proTip}>
-                  <View style={[styles.proIcon, { backgroundColor: '#0D948820' }]}>
-                    <Ionicons name="trending-down" size={16} color={theme.color.brandSecondary} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.proTipLabel}>Savings tip</Text>
-                    <Text style={styles.proTipText}>{data.pro_savings_tip}</Text>
-                  </View>
-                </View>
-                <View style={styles.proTip}>
-                  <View style={[styles.proIcon, { backgroundColor: '#E87A5D20' }]}>
-                    <Ionicons name="warning-outline" size={16} color={theme.color.brandPrimary} />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.proTipLabel}>Unused alert</Text>
-                    <Text style={styles.proTipText}>{data.pro_unused_alert}</Text>
-                  </View>
-                </View>
-
-                {!isPro && (
-                  <BlurView intensity={22} tint="light" style={styles.blurOverlay}>
-                    <View style={styles.blurInner}>
-                      <View style={styles.starBadge}>
-                        <Ionicons name="sparkles" size={16} color={theme.color.gold} />
-                      </View>
-                      <Text style={styles.upgradeTitle}>Unlock Pro Insights</Text>
-                      <Text style={styles.upgradeSub}>Personalized savings tips & unused-sub alerts, powered by AI.</Text>
-                      <Pressable
-                        onPress={upgrade}
-                        disabled={upgrading}
-                        style={({ pressed }) => [{ opacity: pressed ? 0.9 : 1, marginTop: 16 }]}
-                        testID="insights-upgrade"
-                      >
-                        <LinearGradient colors={theme.color.proGradient} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }} style={styles.upgradeBtn}>
-                          {upgrading ? (
-                            <ActivityIndicator color="#FFFFFF" />
-                          ) : (
-                            <>
-                              <Ionicons name="star" size={16} color={theme.color.gold} />
-                              <Text style={styles.upgradeBtnText}>Upgrade to Pro</Text>
-                            </>
-                          )}
-                        </LinearGradient>
-                      </Pressable>
+        {reveals.map(({ saving: f, locked }, i) => (
+          <Reveal key={f.id} index={i} delay={120} style={{ paddingHorizontal: 20, marginTop: 12 }}>
+            <Card
+              padded={false}
+              onPress={() =>
+                locked
+                  ? setUpgrading(true)
+                  : router.push({ pathname: '/subscription/[id]', params: { id: f.sub.id } })
+              }
+              testID={locked ? `saving-locked-${i}` : `saving-${f.sub.name}`}
+            >
+              <View style={s.cardBody}>
+                <View style={s.cardTop}>
+                  {/* No brand avatar on a locked card — the logo is the answer. */}
+                  {locked ? (
+                    <View style={s.kindIcon}>
+                      <Ionicons name={ICON[f.kind]} size={19} color={theme.color.inkMuted} />
                     </View>
-                  </BlurView>
+                  ) : (
+                    <BrandAvatar sub={f.sub} size={42} />
+                  )}
+
+                  <View style={{ flex: 1, gap: 6 }}>
+                    <Text style={s.cardTitle} numberOfLines={2}>
+                      {locked ? LOCKED_LABEL[f.kind] : f.title}
+                    </Text>
+                    <Badge
+                      label={CONFIDENCE[f.confidence].label}
+                      tone={CONFIDENCE[f.confidence].tone}
+                      icon={f.confidence === 'certain' ? 'checkmark-circle' : undefined}
+                    />
+                  </View>
+
+                  <View style={{ alignItems: 'flex-end' }}>
+                    <Text style={s.cardAmount}>{formatMoney(f.annualSaving, f.currency)}</Text>
+                    <Text style={s.cardPer}>a year</Text>
+                  </View>
+                </View>
+
+                {locked ? (
+                  <View style={s.lockRow}>
+                    <Ionicons name="lock-closed" size={13} color={theme.color.inkMuted} />
+                    <Text style={s.lockText}>
+                      We know which one, and exactly what to change
+                    </Text>
+                    <Text style={s.lockCta}>Unlock</Text>
+                  </View>
+                ) : (
+                  <>
+                    {/* The arithmetic, so nobody has to take our word for it. */}
+                    <View style={s.detail}>
+                      <Text style={s.detailText}>{f.detail}</Text>
+                    </View>
+                    <View style={s.actionRow}>
+                      <Ionicons name="arrow-forward-circle" size={16} color={theme.color.brandSecondary} />
+                      <Text style={s.actionText}>{f.action}</Text>
+                    </View>
+                  </>
                 )}
               </View>
-            </View>
-          </>
+            </Card>
+          </Reveal>
+        ))}
+
+        {stillLocked > 0 && (
+          <Reveal delay={220} style={{ paddingHorizontal: 20, marginTop: 18 }}>
+            <Press onPress={() => setUpgrading(true)} haptic="medium" testID="savings-unlock">
+              <LinearGradient
+                colors={theme.color.inkGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={[s.unlock, theme.shadow.lg]}
+              >
+                <View style={{ flex: 1 }}>
+                  <Text style={s.unlockTitle}>
+                    Unlock {formatMoney(behindWall, primary)} a year
+                  </Text>
+                  <Text style={s.unlockSub}>
+                    {stillLocked} more {stillLocked === 1 ? 'finding' : 'findings'}, each with what to do
+                  </Text>
+                </View>
+                <View style={s.unlockIcon}>
+                  <Ionicons name="lock-open" size={18} color={theme.color.ink} />
+                </View>
+              </LinearGradient>
+            </Press>
+          </Reveal>
+        )}
+
+        {subsLoading && (
+          <View style={{ paddingHorizontal: 20, gap: 12, marginTop: 12 }} testID="savings-loading">
+            {[0, 1, 2].map((i) => (
+              <Skeleton key={i} width="100%" height={132} radius={theme.radius.lg} />
+            ))}
+          </View>
+        )}
+
+        {!subsLoading && !found && subs.length > 0 && (
+          <EmptyState
+            icon="shield-checkmark"
+            tone="teal"
+            title="Nothing wasteful found"
+            body="We checked for cheaper annual plans, subscriptions your telecom or card already includes, overlapping services, price rises, and trials about to charge."
+            testID="savings-clean"
+          />
+        )}
+
+        {!subsLoading && subs.length === 0 && (
+          <EmptyState
+            icon="mail-open-outline"
+            title="Add subscriptions to audit"
+            body="Scan your Gmail and we will find what you pay for — then check every one of them for money you should not be spending."
+            actionLabel="Scan Gmail"
+            onAction={() => router.push('/scan')}
+            testID="savings-empty"
+          />
         )}
       </ScrollView>
+
+      <UpgradeSheet
+        product={PRODUCTS.pro}
+        visible={upgrading}
+        onClose={() => setUpgrading(false)}
+        worth={behindWall}
+        currency={primary}
+      />
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  eyebrow: { color: theme.color.brandPrimary, fontSize: 11, fontWeight: '700', letterSpacing: 1.2, textTransform: 'uppercase' },
-  title: { color: theme.color.ink, fontSize: 30, fontWeight: '800', letterSpacing: -0.8, lineHeight: 36, marginTop: 4 },
-  aiCardWrap: { marginTop: 22, marginHorizontal: 24, borderRadius: 24, overflow: 'hidden' },
-  aiCard: { padding: 22 },
-  aiChip: {
-    alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 6,
-    backgroundColor: 'rgba(255,255,255,0.25)', paddingHorizontal: 10, paddingVertical: 5,
-    borderRadius: theme.radius.pill,
+const s = StyleSheet.create({
+  title: { ...theme.type.title1, color: theme.color.ink },
+  subtitle: { ...theme.type.small, color: theme.color.inkSoft, fontWeight: '500', marginTop: 6 },
+
+  heroWrap: {
+    marginTop: 20, marginHorizontal: 20,
+    borderRadius: theme.radius.xl, overflow: 'hidden', ...theme.shadow.md,
   },
-  aiChipText: { color: '#FFFFFF', fontSize: 10, fontWeight: '700', letterSpacing: 0.8 },
-  aiText: { color: '#FFFFFF', fontSize: 17, fontWeight: '600', lineHeight: 24, marginTop: 14 },
-  aiStats: { flexDirection: 'row', marginTop: 20, backgroundColor: 'rgba(0,0,0,0.12)', borderRadius: 16, padding: 12 },
-  aiStat: { flex: 1, alignItems: 'center' },
-  aiStatVal: { color: '#FFFFFF', fontSize: 15, fontWeight: '800', letterSpacing: -0.3 },
-  aiStatLabel: { color: 'rgba(255,255,255,0.75)', fontSize: 10, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.6, marginTop: 3 },
-  aiDivider: { width: 1, backgroundColor: 'rgba(255,255,255,0.25)', marginHorizontal: 8 },
-  section: { marginTop: 28 },
-  sectionTitle: { color: theme.color.ink, fontSize: 18, fontWeight: '700', letterSpacing: -0.4, paddingHorizontal: 24, marginBottom: 14 },
-  categoriesCard: {
-    marginHorizontal: 24, padding: 18, backgroundColor: '#FFFFFF',
-    borderRadius: 24, borderWidth: 1, borderColor: theme.color.border, gap: 14,
+  hero: { padding: 22 },
+  heroLabel: { ...theme.type.overline, color: 'rgba(255,255,255,0.85)' },
+  heroAmount: {
+    color: '#FFFFFF', fontSize: 50, fontWeight: '800',
+    letterSpacing: -2.4, marginTop: 4, height: 60,
   },
-  barRow: { gap: 8 },
-  barHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  catDot: { width: 10, height: 10, borderRadius: 5 },
-  barCat: { color: theme.color.ink, fontSize: 14, fontWeight: '600' },
-  barAmount: { color: theme.color.inkSoft, fontSize: 13, fontWeight: '700' },
-  barTrack: { height: 8, borderRadius: 4, backgroundColor: theme.color.surfaceSecondary, overflow: 'hidden' },
-  barFill: { height: '100%', borderRadius: 4 },
-  proHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 24, marginBottom: 14 },
-  proBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: theme.color.ink, paddingHorizontal: 10, paddingVertical: 4, borderRadius: theme.radius.pill },
-  proBadgeText: { color: theme.color.gold, fontSize: 10, fontWeight: '800', letterSpacing: 0.8 },
-  proTipsWrap: { marginHorizontal: 24, borderRadius: 24, overflow: 'hidden', position: 'relative' },
-  proTip: {
-    flexDirection: 'row', gap: 14, padding: 18, backgroundColor: '#FFFFFF',
-    borderWidth: 1, borderColor: theme.color.border, borderRadius: 20, marginBottom: 10,
-    alignItems: 'flex-start',
+  heroSub: { color: 'rgba(255,255,255,0.9)', ...theme.type.small, fontWeight: '600' },
+  heroChip: {
+    alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 7,
+    backgroundColor: 'rgba(0,0,0,0.18)', paddingHorizontal: 11, paddingVertical: 7,
+    borderRadius: theme.radius.pill, marginTop: 16,
   },
-  proIcon: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
-  proTipLabel: { color: theme.color.brandPrimary, fontSize: 10, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 1 },
-  proTipText: { color: theme.color.ink, fontSize: 14, fontWeight: '600', marginTop: 4, lineHeight: 20 },
-  blurOverlay: {
-    ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center',
-    borderRadius: 24, overflow: 'hidden',
-    backgroundColor: 'rgba(253,251,247,0.4)',
+  heroChipText: { color: '#FFFFFF', fontSize: 11.5, fontWeight: '700' },
+
+  cardBody: { padding: 16, gap: 12 },
+  cardTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  kindIcon: {
+    width: 42, height: 42, borderRadius: 14,
+    backgroundColor: theme.color.surfaceSecondary,
+    alignItems: 'center', justifyContent: 'center',
   },
-  blurInner: { alignItems: 'center', paddingHorizontal: 32 },
-  starBadge: {
-    width: 44, height: 44, borderRadius: 14, backgroundColor: theme.color.ink,
-    alignItems: 'center', justifyContent: 'center', marginBottom: 12,
+  cardTitle: { ...theme.type.bodyStrong, color: theme.color.ink, fontSize: 14.5, lineHeight: 19 },
+  cardAmount: { color: theme.color.brandPrimary, fontSize: 17, fontWeight: '800', letterSpacing: -0.5 },
+  cardPer: { ...theme.type.caption, color: theme.color.inkMuted, fontSize: 10 },
+
+  detail: {
+    backgroundColor: theme.color.surfaceSecondary,
+    borderRadius: theme.radius.md, padding: 12,
   },
-  upgradeTitle: { color: theme.color.ink, fontSize: 20, fontWeight: '800', letterSpacing: -0.4 },
-  upgradeSub: { color: theme.color.inkSoft, fontSize: 13, textAlign: 'center', marginTop: 6, lineHeight: 18 },
-  upgradeBtn: {
-    flexDirection: 'row', gap: 8, alignItems: 'center', justifyContent: 'center',
-    paddingVertical: 14, paddingHorizontal: 24, borderRadius: theme.radius.pill,
-    shadowColor: '#1A1C1E', shadowOpacity: 0.2, shadowRadius: 14, shadowOffset: { width: 0, height: 8 }, elevation: 6,
+  detailText: { ...theme.type.small, color: theme.color.inkSoft, fontWeight: '500', lineHeight: 19 },
+  actionRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  actionText: { color: theme.color.brandSecondaryDeep, ...theme.type.small, fontWeight: '700', flex: 1 },
+
+  lockRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: theme.color.surfaceSecondary,
+    borderRadius: theme.radius.md, padding: 12,
   },
-  upgradeBtnText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700', letterSpacing: 0.3 },
+  lockText: { flex: 1, ...theme.type.caption, color: theme.color.inkSoft },
+  lockCta: { ...theme.type.caption, color: theme.color.brandPrimary, fontWeight: '800' },
+
+  unlock: {
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    borderRadius: theme.radius.lg, padding: 18,
+  },
+  unlockTitle: { color: '#FFFFFF', fontSize: 16, fontWeight: '800', letterSpacing: -0.4 },
+  unlockSub: { color: 'rgba(252,250,247,0.7)', ...theme.type.caption, marginTop: 3 },
+  unlockIcon: {
+    width: 40, height: 40, borderRadius: 20, backgroundColor: '#FFFFFF',
+    alignItems: 'center', justifyContent: 'center',
+  },
 });

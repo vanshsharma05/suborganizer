@@ -32,8 +32,15 @@ const STORE_KEY = 'fx.usdinr.v1';
 /** Hours of drift are immaterial when totalling subscriptions. Months are not. */
 const MAX_AGE_MS = 12 * 60 * 60 * 1000;
 
-/** Free, keyless and CORS-enabled, so the web build can call it too. */
+/** Free and keyless — no account, no key to leak in the bundle. */
 const SOURCE = 'https://open.er-api.com/v6/latest/USD';
+
+/**
+ * A rate is a nicety, not a blocker. Give up quickly and keep the cached or
+ * fallback value rather than leaving `inflight` pending forever on a stalled
+ * connection, which would also block every later refresh attempt.
+ */
+const FETCH_TIMEOUT_MS = 8_000;
 
 let current = FALLBACK_USD_INR;
 let fetchedAt = 0;
@@ -92,8 +99,10 @@ export async function refreshRate(): Promise<number> {
   if (inflight) return inflight;
 
   inflight = (async () => {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
     try {
-      const res = await fetch(SOURCE);
+      const res = await fetch(SOURCE, { signal: controller.signal });
       if (!res.ok) return current;
 
       const json = (await res.json()) as { rates?: Record<string, number> };
@@ -110,9 +119,10 @@ export async function refreshRate(): Promise<number> {
       announce();
       return rate;
     } catch {
-      // Offline, or the source is down. Whatever we already have stands.
+      // Offline, timed out, or the source is down. Whatever we have stands.
       return current;
     } finally {
+      clearTimeout(timer);
       inflight = null;
     }
   })();
@@ -178,24 +188,33 @@ export function fmtMoney(amount: number, cur?: string, opts: { compact?: boolean
 }
 
 /**
- * Converts between the two supported currencies at the live rate.
+ * Converts between the two supported currencies.
  *
  * Anything that is not USD is treated as INR. Rows written before the currency
  * list was narrowed may still carry EUR or GBP; those amounts are rupee-sized
  * far more often than not, so assuming INR keeps the total in the right order
  * of magnitude rather than applying a rate the app no longer tracks.
+ *
+ * `rate` is an explicit parameter rather than a module-global read. Screens
+ * total subscriptions inside `useMemo`, and a hidden read of mutable module
+ * state there is a dependency React cannot see — the totals would keep whatever
+ * rate they first rendered with. Passing the value from `useExchangeRate()`
+ * makes the dependency real. It defaults to the current rate for callers
+ * outside React.
  */
 export function convertToPrimary(
   amount: number,
   fromCur: string | undefined,
   primaryCur: string,
+  rate: number = current,
 ): number {
   const from = (fromCur || 'INR').toUpperCase();
   const to = (primaryCur || 'INR').toUpperCase();
   if (from === to) return amount;
 
-  const inr = from === 'USD' ? amount * current : amount;
-  return to === 'USD' ? inr / current : inr;
+  const usdInrRate = isSane(rate) ? rate : current;
+  const inr = from === 'USD' ? amount * usdInrRate : amount;
+  return to === 'USD' ? inr / usdInrRate : inr;
 }
 
 // Lives in cycles.ts, which has no dependencies and so can be unit-tested

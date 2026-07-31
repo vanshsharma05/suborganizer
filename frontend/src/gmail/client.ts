@@ -13,6 +13,13 @@ const BASE = 'https://gmail.googleapis.com/gmail/v1/users/me';
 /** Gmail allows ~50 messages.get per second per user; 8 in flight stays clear. */
 const CONCURRENCY = 8;
 
+/**
+ * Per-request ceiling. A scan makes hundreds of these, and one socket that
+ * stalls rather than fails would freeze the progress bar with nothing to report
+ * — the pool worker holding it never returns, so the scan never finishes.
+ */
+const REQUEST_TIMEOUT_MS = 15_000;
+
 export type GmailHeaders = {
   id: string;
   threadId: string;
@@ -49,9 +56,26 @@ async function call<T>(path: string, token: string, params: Record<string, strin
 
   const url = `${BASE}${path}?${qs.toString()}`;
 
-  // Retry only the two failures that are worth retrying: rate limiting and 5xx.
+  // Retry only the failures worth retrying: rate limiting, 5xx, and a timeout.
   for (let attempt = 0; ; attempt++) {
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: controller.signal,
+      });
+    } catch {
+      // Timed out or the connection dropped. Both are transient by nature, so
+      // back off and try again rather than failing the whole scan.
+      if (attempt >= 4) throw new Error('Gmail did not respond. Check your connection and scan again.');
+      await new Promise((r) => setTimeout(r, 400 * 2 ** attempt));
+      continue;
+    } finally {
+      clearTimeout(timer);
+    }
 
     if (res.ok) return (await res.json()) as T;
 

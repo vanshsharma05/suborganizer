@@ -16,6 +16,7 @@
  */
 
 import type { Subscription } from './api';
+import { daysUntilISO } from './dates';
 
 /**
  * Days before the trial ends on which to warn.
@@ -27,31 +28,14 @@ import type { Subscription } from './api';
  */
 export const TRIAL_WARNING_DAYS: readonly number[] = [7, 2, 0];
 
-/** Midnight local, so day arithmetic is not thrown off by the current time. */
-function startOfDay(d: Date): Date {
-  const copy = new Date(d);
-  copy.setHours(0, 0, 0, 0);
-  return copy;
-}
-
-/** Parses a `YYYY-MM-DD` column as local midnight, not UTC. */
-function parseDateOnly(iso: string): Date | null {
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
-  if (!m) return null;
-  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
 /**
  * Whole days from `today` until the trial ends. 0 means it ends today, negative
  * means it has already converted. Null when this is not a trial, or the date is
  * missing or unparseable.
  */
 export function trialDaysLeft(sub: Subscription, today: Date = new Date()): number | null {
-  if (!sub.is_trial || !sub.trial_ends) return null;
-  const ends = parseDateOnly(sub.trial_ends);
-  if (!ends) return null;
-  return Math.round((startOfDay(ends).getTime() - startOfDay(today).getTime()) / 86_400_000);
+  if (!sub.is_trial) return null;
+  return daysUntilISO(sub.trial_ends, today);
 }
 
 /**

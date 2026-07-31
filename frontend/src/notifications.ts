@@ -1,8 +1,9 @@
 import * as Notifications from 'expo-notifications';
 import { Subscription } from './api';
 import { fmtMoney } from './currency';
+import { parseISODate } from './dates';
 import { TRIAL_WARNING_DAYS, trialDaysLeft } from './trials';
-import { parseISO, subDays, isAfter } from 'date-fns';
+import { subDays, isAfter } from 'date-fns';
 
 // Set up a foreground handler once.
 Notifications.setNotificationHandler({
@@ -64,10 +65,41 @@ function at9am(d: Date): Date {
  * per notification, not per subscription — hence the day suffix on trial ones.
  *
  * Silently no-ops when permission is not granted.
+ *
+ * Expensive, and deliberately guarded. Each notification is a separate awaited
+ * call across the native bridge, so a dozen subscriptions is upwards of twenty
+ * round trips — enough to visibly stall the dashboard if it runs while the
+ * screen is still painting. `signatureOf` below is what stops it running when
+ * nothing that affects a reminder has actually changed, which is the common
+ * case: every pull-to-refresh hands back a new array of identical rows.
  */
+function signatureOf(subs: Subscription[]): string {
+  return subs
+    .filter((s) => s.status === 'active')
+    .map((s) =>
+      // Only the fields a scheduled reminder is built from. A change to notes or
+      // brand colour must not cost twenty bridge calls.
+      [s.id, s.next_renewal, s.reminder_days_before ?? 3, s.is_trial ? 1 : 0, s.trial_ends ?? '',
+        s.amount, s.currency, s.name].join('~'),
+    )
+    .sort()
+    .join('|');
+}
+
+let lastSignature: string | null = null;
+
+/** Forces the next call to run even if nothing changed. */
+export function invalidateReminderCache(): void {
+  lastSignature = null;
+}
+
 export async function rescheduleReminders(subs: Subscription[]): Promise<number> {
   const { state } = await getNotifPermission();
   if (state !== 'granted') return 0;
+
+  const signature = signatureOf(subs);
+  if (signature === lastSignature) return 0;
+
   try {
     const existing = await Notifications.getAllScheduledNotificationsAsync();
     await Promise.all(
@@ -86,9 +118,8 @@ export async function rescheduleReminders(subs: Subscription[]): Promise<number>
 
       // --- trial conversion ------------------------------------------------
       const left = trialDaysLeft(s, now);
-      if (left !== null && left >= 0 && s.trial_ends) {
-        const ends = parseISO(s.trial_ends);
-
+      const ends = parseISODate(s.trial_ends);
+      if (left !== null && left >= 0 && ends) {
         for (const daysAhead of TRIAL_WARNING_DAYS) {
           const fireDate = at9am(subDays(ends, daysAhead));
           if (!isAfter(fireDate, now)) continue;
@@ -117,7 +148,8 @@ export async function rescheduleReminders(subs: Subscription[]): Promise<number>
       }
 
       // --- ordinary renewal ------------------------------------------------
-      const renew = parseISO(s.next_renewal);
+      const renew = parseISODate(s.next_renewal);
+      if (!renew) continue;
       const daysBefore = s.reminder_days_before ?? 3;
       const fireDate = at9am(subDays(renew, daysBefore));
       if (!isAfter(fireDate, now)) continue;
@@ -134,8 +166,12 @@ export async function rescheduleReminders(subs: Subscription[]): Promise<number>
       scheduled += 1;
     }
 
+    // Only after a clean pass. Recording it earlier would mean a failure
+    // half-way through is never retried, leaving reminders silently missing.
+    lastSignature = signature;
     return scheduled;
   } catch {
+    lastSignature = null;
     return 0;
   }
 }

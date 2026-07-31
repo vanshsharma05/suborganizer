@@ -1,23 +1,84 @@
+/**
+ * Sign-in.
+ *
+ * The gradient runs unbroken from here into the story, so signing in reads as
+ * stepping through a door rather than as one screen replacing another. Nothing
+ * competes with that: no photograph behind it, no card floating on top.
+ *
+ * Google leads and the email form stays hidden until asked for, because most
+ * people will tap Google and never need it — and a form is the single most
+ * effective way to make an app feel like work before it has done anything.
+ *
+ * The three lines under the headline are the pitch. They are specific numbers
+ * rather than adjectives, since "organise your subscriptions" describes a
+ * spreadsheet and "find the ₹4,000 a year you forgot about" describes a reason.
+ */
+
 import React, { useEffect, useState } from 'react';
 import {
-  View, Text, TextInput, StyleSheet, KeyboardAvoidingView, Platform, Pressable,
+  View, Text, TextInput, StyleSheet, KeyboardAvoidingView, Platform,
   ScrollView, ActivityIndicator,
 } from 'react-native';
-import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
+import Animated, {
+  Easing, FadeIn, FadeInDown, FadeInUp, SlideInDown, SlideOutDown,
+  useAnimatedStyle, useSharedValue, withRepeat, withTiming,
+} from 'react-native-reanimated';
 import { useAuth } from '@/src/auth-context';
-import { theme, IMAGES } from '@/src/theme';
-import { GradientButton } from '@/src/ui';
-import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
+import { theme } from '@/src/theme';
+import { Press } from '@/src/motion';
+
+const SELLING_POINTS: { icon: keyof typeof Ionicons.glyphMap; text: string }[] = [
+  { icon: 'mail-open', text: 'Finds subscriptions hiding in your Gmail' },
+  { icon: 'trending-down', text: 'Spots cheaper plans and price rises' },
+  { icon: 'alarm', text: 'Warns you before a free trial charges' },
+];
+
+/** Slow drift behind the gradient, so the first screen is never quite static. */
+function Aurora() {
+  const t = useSharedValue(0);
+
+  useEffect(() => {
+    t.value = withRepeat(
+      withTiming(1, { duration: 11000, easing: Easing.inOut(Easing.sin) }),
+      -1,
+      true,
+    );
+  }, [t]);
+
+  const a = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: -60 + t.value * 90 },
+      { translateY: -30 + t.value * 60 },
+      { scale: 1 + t.value * 0.12 },
+    ],
+  }));
+
+  const b = useAnimatedStyle(() => ({
+    transform: [
+      { translateX: 40 - t.value * 70 },
+      { translateY: 20 - t.value * 50 },
+      { scale: 1.15 - t.value * 0.1 },
+    ],
+  }));
+
+  return (
+    <View style={StyleSheet.absoluteFill} pointerEvents="none">
+      <Animated.View style={[s.blob, { top: -120, left: -90, width: 320, height: 320 }, a]} />
+      <Animated.View style={[s.blob, { bottom: -80, right: -110, width: 380, height: 380 }, b]} />
+    </View>
+  );
+}
 
 export default function AuthScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { signInWithEmail, signUpWithEmail, signInWithGoogle, user } = useAuth();
 
+  const [showEmail, setShowEmail] = useState(false);
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
@@ -28,7 +89,7 @@ export default function AuthScreen() {
   const [googleBusy, setGoogleBusy] = useState(false);
 
   useEffect(() => {
-    if (user) router.replace('/(tabs)/dashboard');
+    if (user) router.replace('/');
   }, [user, router]);
 
   const submit = async () => {
@@ -57,8 +118,8 @@ export default function AuthScreen() {
         }
       }
       // On success the auth listener flips `user`, and the effect above routes.
-    } catch (e: any) {
-      setErr(e.message || 'Something went wrong');
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Something went wrong');
     } finally {
       setBusy(false);
     }
@@ -70,191 +131,261 @@ export default function AuthScreen() {
     setGoogleBusy(true);
     try {
       await signInWithGoogle();
-    } catch (e: any) {
-      setErr(e.message || 'Google sign-in failed');
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Google sign-in failed');
     } finally {
       setGoogleBusy(false);
     }
   };
 
   return (
-    <View style={styles.root}>
-      <Image source={IMAGES.heroMesh} style={StyleSheet.absoluteFillObject} contentFit="cover" />
+    <View style={s.root}>
       <LinearGradient
-        colors={['rgba(253,251,247,0)', 'rgba(253,251,247,0.4)', theme.color.surface]}
-        style={StyleSheet.absoluteFillObject}
-        locations={[0, 0.55, 1]}
+        colors={theme.color.coralGradient}
+        start={{ x: 0.1, y: 0 }}
+        end={{ x: 0.9, y: 1 }}
+        style={StyleSheet.absoluteFill}
       />
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+      <Aurora />
+
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={{ flex: 1 }}
+      >
         <ScrollView
-          contentContainerStyle={[styles.scroll, { paddingTop: insets.top + 40, paddingBottom: insets.bottom + 40 }]}
+          contentContainerStyle={[
+            s.scroll,
+            { paddingTop: insets.top + 64, paddingBottom: insets.bottom + 24 },
+          ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          <Animated.View entering={FadeInDown.duration(600)} style={styles.brand}>
-            <View style={styles.logoDot} />
-            <Text style={styles.brandName}>SubOrganizer</Text>
+          <Animated.View entering={FadeInDown.duration(700)} style={s.brand}>
+            {/* Radius ratio (2/14) matches the launcher icon, so the in-app mark
+                and the icon on the home screen read as the same shape. */}
+            <View style={s.mark} />
+            <Text style={s.brandName}>SubOrganizer</Text>
           </Animated.View>
 
-          <Animated.View entering={FadeInDown.duration(700).delay(120)} style={{ marginTop: 40 }}>
-            <Text style={styles.eyebrow}>Every subscription. One view.</Text>
-            <Text style={styles.hero}>
-              Take back{'\n'}
-              <Text style={{ color: theme.color.brandPrimary }}>control</Text>{' '}
-              of what you pay for.
-            </Text>
-          </Animated.View>
+          <Animated.Text entering={FadeInDown.delay(140).duration(700)} style={s.hero}>
+            Every{'\n'}subscription.{'\n'}One view.
+          </Animated.Text>
 
-          <Animated.View entering={FadeIn.duration(600).delay(300)} style={styles.card}>
-            {/* Google first — it is the fastest path, so it leads. */}
-            <Pressable
-              onPress={googleSignIn}
-              disabled={googleBusy || busy}
-              style={({ pressed }) => [styles.googleBtn, pressed && { opacity: 0.85 }]}
-              testID="auth-google"
+          {!showEmail && (
+            <View style={s.points}>
+              {SELLING_POINTS.map((p, i) => (
+                <Animated.View
+                  key={p.text}
+                  entering={FadeInUp.delay(320 + i * 110).duration(600)}
+                  style={s.point}
+                >
+                  <View style={s.pointIcon}>
+                    <Ionicons name={p.icon} size={14} color="#FFFFFF" />
+                  </View>
+                  <Text style={s.pointText}>{p.text}</Text>
+                </Animated.View>
+              ))}
+            </View>
+          )}
+
+          <View style={{ flex: 1, minHeight: 24 }} />
+
+          {(err ?? notice) !== null && (
+            <Animated.View entering={FadeIn.duration(280)} style={s.message}>
+              <Ionicons name={err !== null ? 'alert-circle' : 'mail-unread'} size={16} color="#FFFFFF" />
+              <Text style={s.messageText} testID={err !== null ? 'auth-error' : 'auth-notice'}>
+                {err ?? notice}
+              </Text>
+            </Animated.View>
+          )}
+
+          {!showEmail ? (
+            <Animated.View entering={FadeInUp.delay(680).duration(600)}>
+              <Press onPress={googleSignIn} disabled={googleBusy} haptic="medium" testID="auth-google">
+                <View style={s.primary}>
+                  {googleBusy ? (
+                    <ActivityIndicator color={theme.color.brandDeep} />
+                  ) : (
+                    <>
+                      <Ionicons name="logo-google" size={18} color="#DB4437" />
+                      <Text style={s.primaryText}>Continue with Google</Text>
+                    </>
+                  )}
+                </View>
+              </Press>
+
+              <Press
+                onPress={() => {
+                  setShowEmail(true);
+                  setErr(null);
+                }}
+                testID="auth-use-email"
+              >
+                <View style={s.ghost}>
+                  <Text style={s.ghostText}>Use email instead</Text>
+                </View>
+              </Press>
+
+              <Text style={s.legal}>
+                Free to use. The Gmail scan and the savings audit are one-time unlocks — never a
+                subscription.
+              </Text>
+            </Animated.View>
+          ) : (
+            <Animated.View
+              entering={SlideInDown.duration(380)}
+              exiting={SlideOutDown.duration(240)}
+              style={{ gap: 11 }}
             >
-              {googleBusy ? (
-                <ActivityIndicator color={theme.color.ink} />
-              ) : (
-                <>
-                  <Ionicons name="logo-google" size={18} color="#DB4437" />
-                  <Text style={styles.googleText}>Continue with Google</Text>
-                </>
-              )}
-            </Pressable>
-
-            <View style={styles.divider}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>or</Text>
-              <View style={styles.dividerLine} />
-            </View>
-
-            <View style={styles.segment}>
-              <Pressable
-                onPress={() => { setMode('login'); setErr(null); }}
-                style={[styles.segItem, mode === 'login' && styles.segActive]}
-                testID="auth-tab-login"
-              >
-                <Text style={[styles.segText, mode === 'login' && styles.segTextActive]}>Sign in</Text>
-              </Pressable>
-              <Pressable
-                onPress={() => { setMode('signup'); setErr(null); }}
-                style={[styles.segItem, mode === 'signup' && styles.segActive]}
-                testID="auth-tab-signup"
-              >
-                <Text style={[styles.segText, mode === 'signup' && styles.segTextActive]}>Create account</Text>
-              </Pressable>
-            </View>
-
-            {mode === 'signup' && (
-              <View style={styles.field}>
-                <Text style={styles.fieldLabel}>Name</Text>
-                <TextInput
-                  value={name} onChangeText={setName}
-                  placeholder="Ava Chen"
-                  placeholderTextColor={theme.color.inkMuted}
-                  style={styles.input}
-                  testID="auth-name-input"
-                  autoCapitalize="words"
-                />
+              <View style={s.segment}>
+                {(['login', 'signup'] as const).map((m) => (
+                  <Press
+                    key={m}
+                    onPress={() => {
+                      setMode(m);
+                      setErr(null);
+                    }}
+                    style={{ flex: 1 }}
+                    testID={`auth-tab-${m}`}
+                  >
+                    <View style={[s.segItem, mode === m && s.segActive]}>
+                      <Text style={[s.segText, mode === m && s.segTextActive]}>
+                        {m === 'login' ? 'Sign in' : 'Create account'}
+                      </Text>
+                    </View>
+                  </Press>
+                ))}
               </View>
-            )}
-            <View style={styles.field}>
-              <Text style={styles.fieldLabel}>Email</Text>
+
+              {mode === 'signup' && (
+                <TextInput
+                  value={name}
+                  onChangeText={setName}
+                  placeholder="Your name"
+                  placeholderTextColor="rgba(255,255,255,0.55)"
+                  style={s.input}
+                  autoCapitalize="words"
+                  testID="auth-name-input"
+                />
+              )}
               <TextInput
-                value={email} onChangeText={setEmail}
+                value={email}
+                onChangeText={setEmail}
                 placeholder="you@example.com"
-                placeholderTextColor={theme.color.inkMuted}
+                placeholderTextColor="rgba(255,255,255,0.55)"
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoComplete="email"
-                style={styles.input}
+                style={s.input}
                 testID="auth-email-input"
               />
-            </View>
-            <View style={styles.field}>
-              <Text style={styles.fieldLabel}>Password</Text>
               <TextInput
-                value={password} onChangeText={setPassword}
-                placeholder={mode === 'signup' ? 'At least 6 characters' : '••••••••'}
-                placeholderTextColor={theme.color.inkMuted}
+                value={password}
+                onChangeText={setPassword}
+                placeholder={mode === 'signup' ? 'At least 6 characters' : 'Password'}
+                placeholderTextColor="rgba(255,255,255,0.55)"
                 secureTextEntry
-                style={styles.input}
+                style={s.input}
                 testID="auth-password-input"
               />
-            </View>
 
-            {err && <Text style={styles.err} testID="auth-error">{err}</Text>}
-            {notice && <Text style={styles.notice} testID="auth-notice">{notice}</Text>}
+              <Press onPress={submit} disabled={busy} haptic="medium" testID="auth-submit">
+                <View style={[s.primary, { marginTop: 5 }]}>
+                  {busy ? (
+                    <ActivityIndicator color={theme.color.brandDeep} />
+                  ) : (
+                    <Text style={s.primaryText}>
+                      {mode === 'login' ? 'Sign in' : 'Create account'}
+                    </Text>
+                  )}
+                </View>
+              </Press>
 
-            <View style={{ height: 8 }} />
-            {busy ? (
-              <View style={styles.busyBtn}><ActivityIndicator color="#fff" /></View>
-            ) : (
-              <GradientButton
-                onPress={submit}
-                label={mode === 'login' ? 'Sign in' : 'Create account'}
-                testID="auth-submit"
-              />
-            )}
-          </Animated.View>
+              <Press
+                onPress={() => {
+                  setShowEmail(false);
+                  setErr(null);
+                }}
+                testID="auth-back-to-google"
+              >
+                <View style={s.ghost}>
+                  <Text style={s.ghostText}>Back</Text>
+                </View>
+              </Press>
+            </Animated.View>
+          )}
         </ScrollView>
       </KeyboardAvoidingView>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: theme.color.surface },
-  scroll: { paddingHorizontal: 24 },
+const s = StyleSheet.create({
+  root: { flex: 1, backgroundColor: theme.color.brandPrimary },
+  scroll: { flexGrow: 1, paddingHorizontal: 28 },
+  blob: { position: 'absolute', borderRadius: 999, backgroundColor: 'rgba(255,255,255,0.1)' },
+
   brand: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  // Radius ratio (2/14 = 0.14) matches the app icon so the in-app mark and the
-  // launcher icon read as the same shape.
-  logoDot: { width: 14, height: 14, borderRadius: 2, backgroundColor: theme.color.brandPrimary, transform: [{ rotate: '45deg' }] },
-  brandName: { color: theme.color.ink, fontSize: 16, fontWeight: '700', letterSpacing: 0.4 },
-  eyebrow: {
-    color: theme.color.brandPrimary, fontSize: 12, fontWeight: '700',
-    letterSpacing: 1.4, textTransform: 'uppercase',
+  mark: {
+    width: 14, height: 14, borderRadius: 2,
+    backgroundColor: '#FFFFFF', transform: [{ rotate: '45deg' }],
   },
+  brandName: { color: '#FFFFFF', fontSize: 15, fontWeight: '700', letterSpacing: 0.6 },
+
   hero: {
-    color: theme.color.ink, fontSize: 40, fontWeight: '800', letterSpacing: -1.2, lineHeight: 46, marginTop: 8,
+    color: '#FFFFFF', fontSize: 46, fontWeight: '800',
+    letterSpacing: -2, lineHeight: 52, marginTop: 40,
   },
-  card: {
-    marginTop: 32, backgroundColor: 'rgba(255,255,255,0.85)', borderRadius: 28, padding: 20,
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.9)',
-    shadowColor: '#1A1C1E', shadowOpacity: 0.06, shadowRadius: 24, shadowOffset: { width: 0, height: 12 }, elevation: 8,
+
+  points: { gap: 13, marginTop: 26 },
+  point: { flexDirection: 'row', alignItems: 'center', gap: 11 },
+  pointIcon: {
+    width: 28, height: 28, borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center', justifyContent: 'center',
   },
-  googleBtn: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10,
-    height: 54, borderRadius: theme.radius.pill, backgroundColor: '#FFFFFF',
-    borderWidth: 1, borderColor: theme.color.borderStrong,
+  pointText: {
+    flex: 1, color: 'rgba(255,255,255,0.94)',
+    fontSize: 14.5, fontWeight: '600', letterSpacing: -0.2,
   },
-  googleText: { color: theme.color.ink, fontSize: 15, fontWeight: '700' },
-  divider: { flexDirection: 'row', alignItems: 'center', gap: 12, marginVertical: 18 },
-  dividerLine: { flex: 1, height: 1, backgroundColor: theme.color.border },
-  dividerText: {
-    color: theme.color.inkMuted, fontSize: 11, fontWeight: '700',
-    textTransform: 'uppercase', letterSpacing: 1,
+
+  message: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 9,
+    backgroundColor: 'rgba(0,0,0,0.24)', borderRadius: theme.radius.md,
+    padding: 13, marginBottom: 14,
   },
+  messageText: { flex: 1, color: '#FFFFFF', fontSize: 13, lineHeight: 19, fontWeight: '600' },
+
+  primary: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9,
+    height: 56, borderRadius: theme.radius.pill, backgroundColor: '#FFFFFF',
+  },
+  primaryText: { color: theme.color.brandDeep, fontSize: 15.5, fontWeight: '800' },
+
+  ghost: { alignItems: 'center', paddingVertical: 16 },
+  ghostText: { color: 'rgba(255,255,255,0.88)', fontSize: 14, fontWeight: '700' },
+
+  legal: {
+    color: 'rgba(255,255,255,0.68)', fontSize: 11.5, lineHeight: 17,
+    textAlign: 'center', paddingHorizontal: 6,
+  },
+
   segment: {
-    flexDirection: 'row', backgroundColor: theme.color.surfaceSecondary,
-    borderRadius: theme.radius.pill, padding: 4, marginBottom: 20,
+    flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.2)',
+    borderRadius: theme.radius.pill, padding: 4, marginBottom: 4,
   },
-  segItem: { flex: 1, height: 40, borderRadius: theme.radius.pill, alignItems: 'center', justifyContent: 'center' },
-  segActive: { backgroundColor: '#FFFFFF', shadowColor: '#1A1C1E', shadowOpacity: 0.06, shadowRadius: 6, shadowOffset: { width: 0, height: 2 }, elevation: 2 },
-  segText: { color: theme.color.inkSoft, fontWeight: '600', fontSize: 13 },
-  segTextActive: { color: theme.color.ink },
-  field: { marginBottom: 14 },
-  fieldLabel: {
-    color: theme.color.inkSoft, fontSize: 11, fontWeight: '700',
-    letterSpacing: 0.8, textTransform: 'uppercase', marginBottom: 6,
+  segItem: {
+    height: 40, borderRadius: theme.radius.pill,
+    alignItems: 'center', justifyContent: 'center',
   },
+  segActive: { backgroundColor: 'rgba(255,255,255,0.96)' },
+  segText: { color: 'rgba(255,255,255,0.82)', fontWeight: '700', fontSize: 13 },
+  segTextActive: { color: theme.color.brandDeep },
+
   input: {
-    height: 52, borderRadius: 14, backgroundColor: theme.color.surface,
-    borderWidth: 1, borderColor: theme.color.border, paddingHorizontal: 16,
-    color: theme.color.ink, fontSize: 16,
+    height: 54, borderRadius: theme.radius.md,
+    backgroundColor: 'rgba(0,0,0,0.2)',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.24)',
+    paddingHorizontal: 18, color: '#FFFFFF', fontSize: 16, fontWeight: '600',
   },
-  err: { color: theme.color.error, marginTop: 4, fontSize: 13, fontWeight: '600' },
-  notice: { color: theme.color.brandSecondary, marginTop: 4, fontSize: 13, fontWeight: '600', lineHeight: 18 },
-  busyBtn: { height: 56, borderRadius: theme.radius.pill, backgroundColor: theme.color.brandDeep, alignItems: 'center', justifyContent: 'center' },
 });

@@ -1,4 +1,10 @@
+import { advanceRenewal } from './cycles';
+import { addDaysISO, daysUntilISO } from './dates';
 import { supabase } from './supabase';
+
+// Re-exported because callers reach for it alongside the queries here, but it
+// lives in cycles.ts so it can be unit-tested without a Supabase client.
+export { advanceRenewal };
 
 export type Subscription = {
   id: string;
@@ -92,10 +98,22 @@ export async function updatePrimaryCurrency(currency: string): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
-export async function upgradeToPro(): Promise<void> {
+/**
+ * Mirrors the store's answer onto the profile row.
+ *
+ * The durable record of a one-time purchase is Play's, not ours — this exists so
+ * a fresh install is Pro before Play has been asked, and so Pro can be granted
+ * by hand for a refund gone wrong. `false` is only ever used by the dev reset in
+ * profile.tsx; nothing in the paid flow revokes anything.
+ */
+export async function setProFlag(is_pro: boolean): Promise<void> {
   const id = await currentUserId();
-  const { error } = await supabase.from('profiles').update({ is_pro: true }).eq('id', id);
+  const { error } = await supabase.from('profiles').update({ is_pro }).eq('id', id);
   if (error) throw new Error(error.message);
+}
+
+export async function upgradeToPro(): Promise<void> {
+  return setProFlag(true);
 }
 
 // ------------------------------------------------------------ subscriptions --
@@ -182,45 +200,14 @@ export async function cancelSubscription(id: string): Promise<Subscription> {
 }
 
 export async function snoozeSubscription(id: string, days: number): Promise<Subscription> {
-  const until = new Date();
-  until.setDate(until.getDate() + Math.max(1, days));
-
   const { data, error } = await supabase
     .from('subscriptions')
-    .update({ snoozed_until: until.toISOString().split('T')[0] })
+    .update({ snoozed_until: addDaysISO(new Date(), Math.max(1, days)) })
     .eq('id', id)
     .select('*')
     .single();
   if (error) throw new Error(error.message);
   return toSub(data);
-}
-
-/**
- * Advance a renewal by one billing cycle — the "Keep it" reminder action.
- * Ported from the old backend's advance_renewal(), including the month-end
- * clamp so 31 Jan on a monthly cycle lands on 28/29 Feb rather than overflowing
- * into March.
- */
-export function advanceRenewal(nextRenewalISO: string, cycle: string): string {
-  const [y, m, d] = nextRenewalISO.split('-').map(Number);
-
-  if (cycle === 'weekly') {
-    const dt = new Date(Date.UTC(y, m - 1, d + 7));
-    return dt.toISOString().split('T')[0];
-  }
-
-  if (cycle === 'yearly') {
-    const lastDay = new Date(Date.UTC(y + 1, m, 0)).getUTCDate();
-    const dt = new Date(Date.UTC(y + 1, m - 1, Math.min(d, lastDay)));
-    return dt.toISOString().split('T')[0];
-  }
-
-  // monthly
-  const ny = m === 12 ? y + 1 : y;
-  const nm = m === 12 ? 1 : m + 1;
-  const lastDay = new Date(Date.UTC(ny, nm, 0)).getUTCDate();
-  const dt = new Date(Date.UTC(ny, nm - 1, Math.min(d, lastDay)));
-  return dt.toISOString().split('T')[0];
 }
 
 export async function keepSubscription(sub: Subscription): Promise<Subscription> {
@@ -273,24 +260,18 @@ export async function dismissPriceChange(id: string): Promise<void> {
  * ones. The old backend computed this in GET /reminders; with the whole list
  * already in memory it is cheaper to derive it on the client.
  */
-export function deriveReminders(subs: Subscription[]): ReminderItem[] {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
+export function deriveReminders(subs: Subscription[], today: Date = new Date()): ReminderItem[] {
   const items: ReminderItem[] = [];
 
   for (const s of subs) {
     if (s.status !== 'active') continue;
 
-    if (s.snoozed_until) {
-      const snoozed = new Date(s.snoozed_until);
-      snoozed.setHours(0, 0, 0, 0);
-      if (snoozed > today) continue;
-    }
+    // Still snoozed if the snooze date has not arrived yet.
+    const snoozeIn = daysUntilISO(s.snoozed_until, today);
+    if (snoozeIn !== null && snoozeIn > 0) continue;
 
-    const renew = new Date(s.next_renewal);
-    renew.setHours(0, 0, 0, 0);
-    const daysLeft = Math.round((renew.getTime() - today.getTime()) / 86_400_000);
+    const daysLeft = daysUntilISO(s.next_renewal, today);
+    if (daysLeft === null) continue;
 
     const window = s.reminder_days_before ?? 3;
     if (daysLeft > window) continue;

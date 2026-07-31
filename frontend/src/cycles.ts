@@ -8,6 +8,11 @@
  * costs per month.
  */
 
+/**
+ * The only three cycles the schema stores. `Cycle` is the alias the Gmail
+ * classifier uses; they are the same thing and must stay that way, so the
+ * classifier imports from here rather than declaring its own.
+ */
 export type BillingCycle = 'weekly' | 'monthly' | 'yearly';
 
 /**
@@ -29,3 +34,41 @@ export const CYCLE_DAYS: Record<BillingCycle, number> = {
   monthly: 30,
   yearly: 365,
 };
+
+/**
+ * The next renewal after `nextRenewalISO`, one cycle later.
+ *
+ * The month-end clamp is the part that matters: 31 January on a monthly cycle
+ * has to land on 28 (or 29) February, because letting the day overflow puts it
+ * in March and every subsequent renewal is then a month adrift.
+ *
+ * Built with `Date.UTC` and read back with `toISOString`, so both ends are on
+ * the same clock and no timezone can shift the day. That is safe *here* because
+ * this function never touches the current time — do not copy the pattern
+ * anywhere that starts from `new Date()`; use src/dates.ts for those. See the
+ * note in README.md.
+ */
+export function advanceRenewal(nextRenewalISO: string, cycle: string): string {
+  const [y, m, d] = nextRenewalISO.split('-').map(Number);
+  if (!y || !m || !d) return nextRenewalISO;
+
+  if (cycle === 'weekly') {
+    return utcDateString(y, m - 1, d + 7);
+  }
+
+  if (cycle === 'yearly') {
+    // Day 0 of the following month is the last day of this one.
+    const lastDay = new Date(Date.UTC(y + 1, m, 0)).getUTCDate();
+    return utcDateString(y + 1, m - 1, Math.min(d, lastDay));
+  }
+
+  // monthly
+  const ny = m === 12 ? y + 1 : y;
+  const nm = m === 12 ? 1 : m + 1;
+  const lastDay = new Date(Date.UTC(ny, nm, 0)).getUTCDate();
+  return utcDateString(ny, nm - 1, Math.min(d, lastDay));
+}
+
+function utcDateString(year: number, monthIndex: number, day: number): string {
+  return new Date(Date.UTC(year, monthIndex, day)).toISOString().slice(0, 10);
+}

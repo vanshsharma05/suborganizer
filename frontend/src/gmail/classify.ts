@@ -8,6 +8,14 @@
  * review step in app/scan.tsx exists to catch.
  */
 
+// The cycle vocabulary is shared with the rest of the app rather than redeclared
+// here — two copies of "what a billing cycle is" is exactly the kind of thing
+// that drifts apart and then disagrees about a total.
+import { BillingCycle, CYCLE_DAYS } from '../cycles';
+
+export type Cycle = BillingCycle;
+export { CYCLE_DAYS };
+
 // ------------------------------------------------------------------ events --
 
 export type EventKind =
@@ -491,8 +499,6 @@ export function extractMoney(text: string): Money | undefined {
 
 // ------------------------------------------------------------------- cycles --
 
-export type Cycle = 'weekly' | 'monthly' | 'yearly';
-
 const CYCLE_WORDS: { cycle: Cycle; re: RegExp }[] = [
   { cycle: 'yearly', re: /\b(?:year(?:ly)?|annual(?:ly)?|12\s*months?|per\s+year|\/\s*(?:yr|year|a)\b)/i },
   { cycle: 'weekly', re: /\b(?:week(?:ly)?|per\s+week|\/\s*(?:wk|week)\b)/i },
@@ -524,8 +530,6 @@ export function cycleFromGaps(sortedDates: number[]): { cycle: Cycle; note?: str
   if (median <= 240) return { cycle: 'monthly', note: 'Charges look half-yearly (~6 months)' };
   return { cycle: 'yearly' };
 }
-
-export const CYCLE_DAYS: Record<Cycle, number> = { weekly: 7, monthly: 30, yearly: 365 };
 
 // ---------------------------------------------------------------- category --
 

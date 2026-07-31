@@ -153,19 +153,19 @@ function ReminderRow({
 
 const styles = StyleSheet.create({
   wrap: {
-    marginTop: 12, marginHorizontal: 24, padding: 18, borderRadius: 24,
-    backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: theme.color.border,
-    shadowColor: '#B84A32', shadowOpacity: 0.08, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 6,
+    marginTop: 14, marginHorizontal: 20, padding: 18,
+    borderRadius: theme.radius.lg, backgroundColor: theme.color.raised,
+    ...theme.shadow.md,
   },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14 },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 11, marginBottom: 14 },
   badgeCircle: {
-    width: 32, height: 32, borderRadius: 10, backgroundColor: theme.color.brandDeep,
+    width: 38, height: 38, borderRadius: 13, backgroundColor: theme.color.brandDeep,
     alignItems: 'center', justifyContent: 'center',
   },
-  title: { color: theme.color.ink, fontSize: 15, fontWeight: '800', letterSpacing: -0.3 },
-  sub: { color: theme.color.inkSoft, fontSize: 12, marginTop: 2 },
+  title: { ...theme.type.bodyStrong, color: theme.color.ink },
+  sub: { ...theme.type.caption, color: theme.color.inkSoft, marginTop: 1 },
   row: {
-    borderRadius: 18, backgroundColor: theme.color.surfaceSecondary, padding: 12,
+    borderRadius: theme.radius.md, backgroundColor: theme.color.surfaceSecondary, padding: 12,
   },
   rowTop: { flexDirection: 'row', alignItems: 'center' },
   rowName: { color: theme.color.ink, fontSize: 15, fontWeight: '700' },
@@ -176,11 +176,11 @@ const styles = StyleSheet.create({
   actionsRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
   actionBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: 10, paddingVertical: 8, borderRadius: theme.radius.pill,
-    backgroundColor: '#FFFFFF', borderWidth: 1,
+    paddingHorizontal: 11, paddingVertical: 9, borderRadius: theme.radius.pill,
+    backgroundColor: theme.color.raised,
   },
-  cancelBtn: { borderColor: '#DC262640' },
-  snoozeBtn: { borderColor: theme.color.border },
+  cancelBtn: { backgroundColor: theme.color.errorTint },
+  snoozeBtn: { backgroundColor: theme.color.raised },
   actionText: { fontSize: 12, fontWeight: '700' },
   keepBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5,

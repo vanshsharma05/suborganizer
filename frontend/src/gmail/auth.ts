@@ -57,13 +57,35 @@ export class GmailAuthError extends Error {
 
 // ------------------------------------------------------------------ config --
 
+/**
+ * True in the development variant, which app.config.js gives its own package
+ * name so it can sit alongside the Play install.
+ *
+ * Google keys an Android OAuth client to a package name, so the dev variant
+ * cannot reuse the production client — it needs its own, and therefore its own
+ * client id.
+ */
+const isDevVariant = (Constants.expoConfig?.android?.package ?? '').endsWith('.dev');
+
 function clientId(): string {
   const id =
     Platform.OS === 'ios'
       ? process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID
-      : process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID;
+      : isDevVariant
+        ? process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID_DEV
+        : process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID;
 
   if (!id) {
+    // Said plainly, because the alternative is Google returning an opaque
+    // redirect_uri_mismatch that gives no hint about the package name.
+    if (isDevVariant) {
+      throw new GmailAuthError(
+        'Gmail scanning needs its own OAuth client in the dev build, because it ' +
+          'runs under com.suborganizer.app.dev. Create an Android client for that ' +
+          'package and set EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID_DEV — see ' +
+          'docs/gmail-setup.md. It works in preview and production builds already.',
+      );
+    }
     throw new GmailAuthError(
       `Gmail scanning is not configured for ${Platform.OS}. Add the matching ` +
         'EXPO_PUBLIC_GOOGLE_*_CLIENT_ID to frontend/.env — see docs/gmail-setup.md.',
