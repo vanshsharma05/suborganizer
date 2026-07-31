@@ -49,13 +49,20 @@ const AnimatedScrollView = Animated.createAnimatedComponent(ScrollView);
  * order is readable at a glance. It also survives being 12px tall, which a
  * donut does not, so it can sit inline instead of demanding its own card.
  */
-function SpendBar({ data, total }: { data: { key: string; value: number }[]; total: number }) {
+/*
+ * `amount`, not `value`: the Reanimated Babel plugin rewrites any `.value` read
+ * inside an inline `style={{ }}` in JSX and warns that a shared value is being
+ * unwrapped. It matches on the property name alone, so a plain number called
+ * `value` trips it — once per segment per render, which buries every other
+ * warning in the log.
+ */
+function SpendBar({ data, total }: { data: { key: string; amount: number }[]; total: number }) {
   if (total <= 0) return null;
 
   return (
     <View style={sb.track}>
       {data.map((d, i) => (
-        <Reveal key={d.key} index={i} delay={140} distance={0} style={{ flexGrow: d.value }}>
+        <Reveal key={d.key} index={i} delay={140} distance={0} style={{ flexGrow: d.amount }}>
           <View
             style={[
               sb.segment,
@@ -178,8 +185,8 @@ export default function Dashboard() {
       m[s.category] = (m[s.category] ?? 0) + convertToPrimary(monthlyEquivalent(s), s.currency, primary, rate);
     }
     return Object.entries(m)
-      .map(([key, value]) => ({ key, value }))
-      .sort((a, b) => b.value - a.value);
+      .map(([key, amount]) => ({ key, amount }))
+      .sort((a, b) => b.amount - a.amount);
   }, [charging, primary, rate]);
 
   /**
@@ -192,8 +199,8 @@ export default function Dashboard() {
    */
   const topCats = useMemo(() => {
     if (byCat.length <= 4) return byCat;
-    const rest = byCat.slice(3).reduce((sum, c) => sum + c.value, 0);
-    return [...byCat.slice(0, 3), { key: 'Other', value: rest }];
+    const rest = byCat.slice(3).reduce((sum, c) => sum + c.amount, 0);
+    return [...byCat.slice(0, 3), { key: 'Other', amount: rest }];
   }, [byCat]);
 
   const upcoming = useMemo(
@@ -334,7 +341,7 @@ export default function Dashboard() {
                         style={[s.legendDot, { backgroundColor: CATEGORY_COLORS[c.key] ?? '#FFFFFF' }]}
                       />
                       <Text style={s.legendText} numberOfLines={1}>
-                        {c.key} {formatMoneyRounded(c.value, primary)}
+                        {c.key} {formatMoneyRounded(c.amount, primary)}
                       </Text>
                     </View>
                   ))}
