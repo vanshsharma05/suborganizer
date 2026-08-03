@@ -48,13 +48,12 @@ const AnimatedScrollView = Animated.createAnimatedComponent(ScrollView);
  * puts the categories in a row so the biggest is simply the widest and the
  * order is readable at a glance. It also survives being 12px tall, which a
  * donut does not, so it can sit inline instead of demanding its own card.
- */
-/*
- * `amount`, not `value`: the Reanimated Babel plugin rewrites any `.value` read
- * inside an inline `style={{ }}` in JSX and warns that a shared value is being
- * unwrapped. It matches on the property name alone, so a plain number called
- * `value` trips it — once per segment per render, which buries every other
- * warning in the log.
+ *
+ * The field is `amount`, not `value`: the Reanimated Babel plugin rewrites any
+ * `.value` read inside an inline `style={{ }}` in JSX and warns that a shared
+ * value is being unwrapped. It matches on the property name alone, so a plain
+ * number called `value` trips it — once per segment per render, which buries
+ * every other warning in the log.
  */
 function SpendBar({ data, total }: { data: { key: string; amount: number }[]; total: number }) {
   if (total <= 0) return null;
@@ -83,17 +82,32 @@ const sb = StyleSheet.create({
   segment: { flex: 1, height: 14, borderRadius: 7 },
 });
 
-/** Days remaining, drawn as a filling ring so proximity is felt, not read. */
+/**
+ * Days remaining, drawn as a filling ring so proximity is felt, not read.
+ *
+ * A date already in the past is called late rather than folded into "Today".
+ * They are different facts and only one of them is actionable: "Today" says the
+ * charge is coming, "6d late" says it has already happened and the date on
+ * record is wrong. Collapsing them meant a subscription whose renewal was never
+ * advanced sat at the top of Coming up claiming to be due today, every day,
+ * indefinitely.
+ */
 function DayRing({ days, size = 38 }: { days: number; size?: number }) {
+  const late = days < 0;
   // Anything past a month reads as "not soon"; compressing it keeps the ring
   // meaningful in the window where it matters.
   const fraction = Math.max(0, Math.min(1, 1 - days / 30));
-  const urgent = days <= 3;
-  const color = urgent ? theme.color.error : days <= 7 ? theme.color.warning : theme.color.brandSecondary;
+  const color = late || days <= 3
+    ? theme.color.error
+    : days <= 7 ? theme.color.warning : theme.color.brandSecondary;
 
+  // minWidth rather than width: "6d late" is wider than the ring, and a fixed
+  // width would clip the very label that says something is wrong.
   return (
-    <View style={{ width: size, alignItems: 'center', gap: 5 }}>
-      <Text style={[ring.label, { color }]}>{days <= 0 ? 'Today' : `${days}d`}</Text>
+    <View style={{ minWidth: size, alignItems: 'center', gap: 5 }}>
+      <Text style={[ring.label, { color }]} numberOfLines={1}>
+        {late ? `${Math.abs(days)}d late` : days === 0 ? 'Today' : `${days}d`}
+      </Text>
       <View style={{ width: size }}>
         <Meter fraction={fraction} color={color} height={4} track="rgba(19,21,24,0.08)" />
       </View>
@@ -109,7 +123,7 @@ export default function Dashboard() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const {
-    user, subs, subsError, subsLoading, refreshSubs, refreshReminders, priceChanges,
+    user, subs, subsError, subsLoading, refreshSubs, reminders, refreshReminders, priceChanges,
     refreshPriceChanges,
   } = useAuth();
 
@@ -203,12 +217,24 @@ export default function Dashboard() {
     return [...byCat.slice(0, 3), { key: 'Other', amount: rest }];
   }, [byCat]);
 
+  /**
+   * What is coming *after* the things already being asked about.
+   *
+   * Anything inside its reminder window is shown above by RemindersSection, with
+   * Keep, Snooze and Cancel attached to it. Listing it again down here gave the
+   * same subscription two appearances on one screen, a few hundred pixels apart,
+   * with different things you could do to it — and made the strip lead with rows
+   * the user had just been asked to act on rather than with what is next.
+   */
+  const remindingIds = useMemo(() => new Set(reminders.map((r) => r.id)), [reminders]);
+
   const upcoming = useMemo(
     () =>
-      [...charging]
+      charging
+        .filter((s) => !remindingIds.has(s.id))
         .sort((a, b) => parseISO(a.next_renewal).getTime() - parseISO(b.next_renewal).getTime())
         .slice(0, 8),
-    [charging],
+    [charging, remindingIds],
   );
 
   const trials = useMemo(() => activeTrials(allActive), [allActive]);
@@ -253,7 +279,16 @@ export default function Dashboard() {
         scrollEventThrottle={16}
         contentContainerStyle={{ paddingBottom: insets.bottom + 108 }}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.color.brand} />
+          // `tintColor` is the iOS spinner and `colors` is the Android one —
+          // setting only the first left Android with its default blue, the one
+          // colour this app never uses anywhere else.
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={theme.color.brand}
+            colors={[theme.color.brand]}
+            progressBackgroundColor={theme.color.raised}
+          />
         }
         showsVerticalScrollIndicator={false}
         testID="dashboard-scroll"
@@ -363,7 +398,7 @@ export default function Dashboard() {
                   <Text style={s.alertTitle}>Could not load your subscriptions</Text>
                   <Text style={s.alertBody}>{subsError}</Text>
                 </View>
-                <Press onPress={onRefresh} testID="dashboard-retry">
+                <Press onPress={onRefresh} hitSlop={10} testID="dashboard-retry">
                   <View style={s.retry}><Text style={s.retryText}>Retry</Text></View>
                 </Press>
               </View>
@@ -452,6 +487,8 @@ export default function Dashboard() {
                       await refreshPriceChanges();
                     }}
                     scale={0.85}
+                    hitSlop={10}
+                    accessibilityLabel={`Dismiss the price rise for ${r.sub.name}`}
                     testID={`dismiss-rise-${r.sub.name}`}
                   >
                     <View style={s.dismiss}>
@@ -477,7 +514,7 @@ export default function Dashboard() {
                   <Text style={s.alertTitle}>Reminders before you are charged</Text>
                   <Text style={s.alertBody}>A few days ahead, so cancelling is still an option.</Text>
                 </View>
-                <Press onPress={promptForNotifs} testID="dashboard-enable-notifs">
+                <Press onPress={promptForNotifs} hitSlop={10} testID="dashboard-enable-notifs">
                   <View style={s.retry}><Text style={s.retryText}>Enable</Text></View>
                 </Press>
               </View>
@@ -557,8 +594,15 @@ export default function Dashboard() {
                 </Reveal>
               );
             })}
+            {/* "Nothing due" would contradict the card directly above it, which
+                is listing charges that are coming. Everything soon is simply
+                already up there being asked about. */}
             {upcoming.length === 0 && (
-              <Text style={s.quiet}>Nothing due in the near future.</Text>
+              <Text style={s.quiet}>
+                {reminders.length > 0
+                  ? 'Everything close is listed above.'
+                  : 'Nothing due in the near future.'}
+              </Text>
             )}
           </ScrollView>
         )}

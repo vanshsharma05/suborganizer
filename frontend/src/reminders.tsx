@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Pressable, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Animated, { FadeInDown, FadeOut, LinearTransition } from 'react-native-reanimated';
 import { theme } from './theme';
@@ -8,9 +9,11 @@ import { BrandAvatar, formatMoney } from './ui';
 import { cancelSubscription, keepSubscription, ReminderItem, snoozeSubscription } from './api';
 import { useAuth } from './auth-context';
 import { CancelSheet } from './cancel-sheet';
+import { Press } from './motion';
 
 export function RemindersSection() {
   const { reminders, refreshSubs } = useAuth();
+  const router = useRouter();
   const [busyId, setBusyId] = useState<string | null>(null);
   // The subscription whose cancellation sheet is open, if any.
   const [cancelling, setCancelling] = useState<ReminderItem | null>(null);
@@ -59,8 +62,19 @@ export function RemindersSection() {
         ))}
       </Animated.View>
 
+      {/* Was plain text: it named a number of charges the user could not then
+          go and look at. The calendar is where the rest of them are. */}
       {reminders.length > 4 && (
-        <Text style={styles.moreText}>+ {reminders.length - 4} more coming up soon</Text>
+        <Press
+          onPress={() => router.push('/calendar')}
+          style={styles.more}
+          testID="reminders-see-more"
+        >
+          <Text style={styles.moreText}>
+            + {reminders.length - 4} more coming up soon
+          </Text>
+          <Ionicons name="chevron-forward" size={14} color={theme.color.inkSoft} />
+        </Press>
       )}
 
       <CancelSheet
@@ -114,25 +128,33 @@ function ReminderRow({
           <View style={styles.busyRow}><ActivityIndicator color={theme.color.brand} size="small" /></View>
         ) : (
           <>
-            <Pressable
+            {/* Press rather than Pressable throughout: these are the most
+                consequential taps on Home — one of them ends a subscription —
+                and they were the ones with no press response at all. */}
+            <Press
               onPress={onCancel}
-              style={({ pressed }) => [styles.actionBtn, styles.cancelBtn, pressed && { opacity: 0.85 }]}
+              style={[styles.actionBtn, styles.cancelBtn]}
+              haptic="medium"
+              accessibilityLabel={`Cancel ${item.name}`}
               testID={`reminder-cancel-${item.name}`}
             >
               <Ionicons name="close-circle-outline" size={15} color={theme.color.error} />
               <Text style={[styles.actionText, { color: theme.color.error }]}>Cancel it</Text>
-            </Pressable>
-            <Pressable
+            </Press>
+            <Press
               onPress={onSnooze}
-              style={({ pressed }) => [styles.actionBtn, styles.snoozeBtn, pressed && { opacity: 0.85 }]}
+              style={[styles.actionBtn, styles.snoozeBtn]}
+              accessibilityLabel={`Snooze ${item.name} for three days`}
               testID={`reminder-snooze-${item.name}`}
             >
               <Ionicons name="time-outline" size={15} color={theme.color.inkSoft} />
               <Text style={[styles.actionText, { color: theme.color.inkSoft }]}>Snooze 3d</Text>
-            </Pressable>
-            <Pressable
+            </Press>
+            <Press
               onPress={onKeep}
-              style={({ pressed }) => [pressed && { opacity: 0.85 }, { flex: 1 }]}
+              style={{ flex: 1 }}
+              haptic="medium"
+              accessibilityLabel={`Keep ${item.name}`}
               testID={`reminder-keep-${item.name}`}
             >
               <LinearGradient
@@ -143,7 +165,7 @@ function ReminderRow({
                 <Ionicons name="checkmark-circle" size={15} color="#FFFFFF" />
                 <Text style={styles.keepText}>Keep it</Text>
               </LinearGradient>
-            </Pressable>
+            </Press>
           </>
         )}
       </View>
@@ -174,9 +196,11 @@ const styles = StyleSheet.create({
   chipDot: { width: 6, height: 6, borderRadius: 3 },
   chipText: { fontSize: 11, fontWeight: '700' },
   actionsRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  // 44 tall, not 34. Three buttons sat side by side on a phone, one of them
+  // destructive, at a size that made hitting the wrong one plausible.
   actionBtn: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    paddingHorizontal: 11, paddingVertical: 9, borderRadius: theme.radius.pill,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4,
+    paddingHorizontal: 12, minHeight: 44, borderRadius: theme.radius.pill,
     backgroundColor: theme.color.raised,
   },
   cancelBtn: { backgroundColor: theme.color.errorTint },
@@ -184,9 +208,13 @@ const styles = StyleSheet.create({
   actionText: { fontSize: 12, fontWeight: '700' },
   keepBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5,
-    paddingVertical: 9, borderRadius: theme.radius.pill,
+    minHeight: 44, borderRadius: theme.radius.pill,
   },
   keepText: { color: '#FFFFFF', fontWeight: '800', fontSize: 12 },
   busyRow: { paddingVertical: 8, flex: 1, alignItems: 'center' },
-  moreText: { color: theme.color.inkSoft, fontSize: 12, textAlign: 'center', marginTop: 12, fontWeight: '600' },
+  more: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4,
+    minHeight: 44, marginTop: 4,
+  },
+  moreText: { color: theme.color.inkSoft, fontSize: 12, textAlign: 'center', fontWeight: '600' },
 });

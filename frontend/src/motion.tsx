@@ -82,6 +82,8 @@ export function Press({
   scale = 0.97,
   haptic = 'light',
   disabled,
+  hitSlop,
+  accessibilityLabel,
   testID,
 }: {
   onPress?: () => void;
@@ -91,6 +93,16 @@ export function Press({
   /** `selection` is the flick a toggle should give — lighter than a tap on a button. */
   haptic?: 'light' | 'medium' | 'selection' | 'none';
   disabled?: boolean;
+  /**
+   * Extra touchable area outside the drawn bounds.
+   *
+   * Some controls should not be 44pt of ink — a dismiss cross that big would
+   * dominate the row it sits in. This lets the target be the right size without
+   * the button having to be.
+   */
+  hitSlop?: number;
+  /** Needed wherever the child is an icon, since there is no text to read out. */
+  accessibilityLabel?: string;
   testID?: string;
 }) {
   const pressed = useSharedValue(0);
@@ -112,6 +124,10 @@ export function Press({
       }}
       onPress={onPress}
       disabled={disabled}
+      hitSlop={hitSlop}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityState={{ disabled: disabled === true }}
       testID={testID}
     >
       <Animated.View style={[style, animated, disabled === true && { opacity: 0.45 }]}>
