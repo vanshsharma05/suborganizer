@@ -31,6 +31,7 @@ import { PRODUCTS, type ProductId } from './entitlements';
 import { usePurchases } from './purchases';
 import { theme } from './theme';
 import { fmtMoney } from './currency';
+import { Press } from './motion';
 
 type Pitch = {
   eyebrow: string;
@@ -159,17 +160,22 @@ export function UpgradeSheet({
             </Animated.View>
           )}
 
-          <Pressable
+          {/* Through Press like every other primary button. This was the last
+              bare Pressable in the app, which meant the one tap the whole screen
+              exists to earn was the one that did not answer. */}
+          <Press
             onPress={purchase}
             disabled={busy || !buyable}
-            style={({ pressed }) => [s.buyWrap, pressed && { opacity: 0.92 }]}
+            haptic="medium"
+            style={s.buyWrap}
+            accessibilityLabel={price ? `${pitch.cta} for ${price}` : pitch.cta}
             testID="paywall-buy"
           >
             <LinearGradient
               colors={theme.color.coralGradient}
               start={{ x: 0, y: 0 }}
               end={{ x: 1, y: 1 }}
-              style={[s.buy, !buyable && { opacity: 0.55 }]}
+              style={s.buy}
             >
               {busy ? (
                 <ActivityIndicator color="#FFFFFF" />
@@ -183,7 +189,7 @@ export function UpgradeSheet({
                 </Text>
               )}
             </LinearGradient>
-          </Pressable>
+          </Press>
 
           <Text style={s.footnote}>{pitch.footnote}</Text>
 

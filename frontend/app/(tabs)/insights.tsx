@@ -22,7 +22,9 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, RefreshControl } from 'react-native';
+import {
+  View, Text, StyleSheet, ScrollView, RefreshControl, useWindowDimensions,
+} from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
@@ -32,7 +34,8 @@ import Animated, { FadeIn, LinearTransition } from 'react-native-reanimated';
 import { theme } from '@/src/theme';
 import { useAuth } from '@/src/auth-context';
 import { Badge, BrandAvatar, Button, Card, EmptyState, formatMoney } from '@/src/ui';
-import { CountUp, Press, Reveal, Skeleton } from '@/src/motion';
+import { CountUp, groupDigits, Press, Reveal, Skeleton } from '@/src/motion';
+import { fitText } from '@/src/fit-text';
 import { convertToPrimary, symbolFor, useExchangeRate } from '@/src/currency';
 import { runAudit, type Saving, type SavingConfidence } from '@/src/savings';
 import { LOCKED_LABEL, lockedCount, lockedValue, PRODUCTS, revealAudit } from '@/src/entitlements';
@@ -65,6 +68,12 @@ const CONFIDENCE: Record<
 
 const ORDER: SavingConfidence[] = ['certain', 'likely', 'check'];
 
+/** Long enough to notice and reach, short enough not to become furniture. */
+const UNDO_VISIBLE_MS = 6_000;
+
+/** Hero margins plus the gradient's own padding; see `heroWrap` and `hero`. */
+const HERO_PAD = 20 + 22;
+
 const ICON: Record<Saving['kind'], keyof typeof Ionicons.glyphMap> = {
   'trial-converting': 'hourglass',
   bundled: 'gift',
@@ -88,6 +97,7 @@ export default function SavingsScreen() {
 
   const primary = (user?.primary_currency || 'INR').toUpperCase();
   const rate = useExchangeRate();
+  const { width } = useWindowDimensions();
 
   useEffect(() => {
     void readDismissals().then(setDismissals);
@@ -103,6 +113,12 @@ export default function SavingsScreen() {
         dismissed: hidden,
       }),
     [subs, priceChanges, primary, rate, hidden],
+  );
+
+  const heroSize = fitText(
+    `${symbolFor(primary)}${groupDigits(audit.totalAnnual, primary === 'INR')}`,
+    width - HERO_PAD * 2,
+    50,
   );
 
   const reveals = useMemo(() => revealAudit(audit.savings, unlocked), [audit.savings, unlocked]);
@@ -148,6 +164,20 @@ export default function SavingsScreen() {
     }
   };
 
+  /*
+   * The undo bar retires itself.
+   *
+   * Nothing cleared it but tapping Undo or Show them again, so after a single
+   * dismissal it sat pinned above the tab bar for the rest of the session,
+   * covering the findings underneath and still offering to undo something the
+   * user had long since moved on from.
+   */
+  useEffect(() => {
+    if (undo === null) return;
+    const t = setTimeout(() => setUndo(null), UNDO_VISIBLE_MS);
+    return () => clearTimeout(t);
+  }, [undo]);
+
   const hiddenCount = hidden.size;
 
   return (
@@ -155,7 +185,13 @@ export default function SavingsScreen() {
       <ScrollView
         contentContainerStyle={{ paddingTop: insets.top + 16, paddingBottom: insets.bottom + 110 }}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.color.brand} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={theme.color.brand}
+            colors={[theme.color.brand]}
+            progressBackgroundColor={theme.color.raised}
+          />
         }
         showsVerticalScrollIndicator={false}
         testID="savings-scroll"
@@ -186,7 +222,11 @@ export default function SavingsScreen() {
                 value={audit.totalAnnual}
                 symbol={symbolFor(primary)}
                 indian={primary === 'INR'}
-                style={s.heroAmount}
+                // Sized to fit, for the same reason the story's figures are:
+                // CountUp draws into a TextInput, which clips rather than
+                // wrapping. This is the number the paid unlock is arguing for,
+                // so losing its last digits is the worst place to do it.
+                style={[s.heroAmount, { fontSize: heroSize, height: heroSize * 1.2 }]}
                 testID="savings-total"
               />
             )}
@@ -406,9 +446,10 @@ const s = StyleSheet.create({
   },
   hero: { padding: 22 },
   heroLabel: { ...theme.type.overline, color: 'rgba(255,255,255,0.85)' },
+  // fontSize and height are set per device; see heroSize above.
   heroAmount: {
-    color: '#FFFFFF', fontSize: 50, fontWeight: '800',
-    letterSpacing: -2.4, marginTop: 4, height: 60,
+    color: '#FFFFFF', fontWeight: '800',
+    letterSpacing: -2.4, marginTop: 4,
   },
   heroSkeleton: { backgroundColor: 'rgba(255,255,255,0.28)' },
   heroSub: { color: 'rgba(255,255,255,0.9)', ...theme.type.small, fontWeight: '600' },
@@ -446,9 +487,10 @@ const s = StyleSheet.create({
   actionRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   actionText: { color: theme.color.brandSecondaryDeep, ...theme.type.small, fontWeight: '700', flex: 1 },
 
+  // 44 tall. It is meant to be quiet, not hard to hit.
   dismiss: {
     alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 5,
-    paddingVertical: 6, paddingRight: 12,
+    minHeight: 44, paddingRight: 16,
   },
   dismissText: { ...theme.type.caption, color: theme.color.inkMuted, fontWeight: '600' },
 
@@ -486,5 +528,8 @@ const s = StyleSheet.create({
     ...theme.shadow.lg,
   },
   undoText: { flex: 1, color: theme.color.onInverse, ...theme.type.small, fontWeight: '600' },
-  undoAction: { color: theme.color.brand, ...theme.type.small, fontWeight: '800' },
+  undoAction: {
+    color: theme.color.brand, ...theme.type.small, fontWeight: '800',
+    minHeight: 44, paddingHorizontal: 8, textAlignVertical: 'center', lineHeight: 44,
+  },
 });
