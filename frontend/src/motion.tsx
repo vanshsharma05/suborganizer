@@ -167,7 +167,10 @@ export function Reveal({
  * three together and then pairs — 12,34,567, not 1,234,567 — and getting that
  * wrong in an India-first app is immediately visible to every user.
  */
-function groupDigits(value: number, indian: boolean): string {
+// Exported so a caller can measure what CountUp is about to draw and size the
+// text to fit it. It is a worklet, but an ordinary function too — calling it
+// from the JS thread to count characters is fine.
+export function groupDigits(value: number, indian: boolean): string {
   'worklet';
   const negative = value < 0;
   const digits = String(Math.abs(Math.round(value)));
