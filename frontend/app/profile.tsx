@@ -20,7 +20,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 
 import { theme } from '@/src/theme';
 import { useAuth } from '@/src/auth-context';
-import { updatePrimaryCurrency } from '@/src/api';
+import { deleteAccount, updatePrimaryCurrency } from '@/src/api';
 import { CURRENCIES, symbolFor } from '@/src/currency';
 import { resetStory } from '@/src/story-storage';
 import { usePurchases } from '@/src/purchases';
@@ -106,6 +106,7 @@ export default function ProfileScreen() {
   const [curError, setCurError] = useState<string | null>(null);
   const [gmail, setGmail] = useState<GmailConnection | null>(null);
   const [upgrading, setUpgrading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   // On focus rather than on mount: Gmail is connected on another screen, and
   // this one should not still read "Not connected" when you come back.
@@ -163,24 +164,54 @@ export default function ProfileScreen() {
     }
   };
 
+  const runDelete = async () => {
+    setDeleting(true);
+    try {
+      await deleteAccount();
+      // Clears the local session and the cached list too, so what follows is a
+      // sign-in screen rather than a dashboard full of a deleted account's data.
+      await logout();
+      router.replace('/auth');
+    } catch (e) {
+      setDeleting(false);
+      Alert.alert(
+        'Could not delete your account',
+        `${e instanceof Error ? e.message : 'Something went wrong.'} If this keeps happening, email ${SUPPORT_EMAIL} and we will do it by hand.`,
+      );
+    }
+  };
+
+  /**
+   * Deletes the account from inside the app.
+   *
+   * This used to open a mail client and ask support to do it by hand. Both
+   * stores require better — Apple rejects a support address outright under
+   * 5.1.1(v), and Play wants an in-app route as well as a web one — but the
+   * plainer argument is that an account you can create in one tap should not
+   * take an email and a wait to be rid of.
+   *
+   * Two prompts rather than one, so the tap that actually destroys everything
+   * is never the tap that was already on its way to the screen.
+   */
   const confirmDelete = () => {
     Alert.alert(
       'Delete your account',
-      'This removes your account and every subscription you have tracked. It cannot be undone.\n\n' +
-        `We handle deletions by email so we can confirm it is you. Tap Continue to open a request to ${SUPPORT_EMAIL}.`,
+      `This deletes ${user?.email ?? 'your account'} and every subscription you have tracked. It happens immediately and cannot be undone.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
           text: 'Continue',
           style: 'destructive',
-          onPress: () =>
-            openUrl(
-              `mailto:${SUPPORT_EMAIL}` +
-                `?subject=${encodeURIComponent('Delete my SubOrganizer account')}` +
-                `&body=${encodeURIComponent(
-                  `Please delete my account and all associated data.\n\nAccount email: ${user?.email ?? ''}\n`,
-                )}`,
-            ),
+          onPress: () => {
+            Alert.alert('Last chance', 'There is no undo, and no copy is kept.', [
+              { text: 'Keep my account', style: 'cancel' },
+              {
+                text: 'Delete everything',
+                style: 'destructive',
+                onPress: () => void runDelete(),
+              },
+            ]);
+          },
         },
       ],
     );
@@ -304,9 +335,11 @@ export default function ProfileScreen() {
     {
       icon: 'trash-outline',
       label: 'Delete account',
+      // Says it is working, and cannot be started twice while it is.
+      value: deleting ? 'Deleting…' : undefined,
       colour: theme.color.error,
       destructive: true,
-      onPress: confirmDelete,
+      onPress: deleting ? () => {} : confirmDelete,
     },
   ];
 

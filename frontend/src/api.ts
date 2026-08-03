@@ -1,6 +1,6 @@
 import { advanceRenewal, currentRenewal } from './cycles';
 import { addDaysISO, daysUntilISO, toISODate } from './dates';
-import { supabase } from './supabase';
+import { describeError, supabase } from './supabase';
 
 // Re-exported because callers reach for it alongside the queries here, but it
 // lives in cycles.ts so it can be unit-tested without a Supabase client.
@@ -96,6 +96,23 @@ export async function updatePrimaryCurrency(currency: string): Promise<void> {
     .update({ primary_currency: currency.toUpperCase() })
     .eq('id', id);
   if (error) throw new Error(error.message);
+}
+
+/**
+ * Deletes the signed-in account and everything hanging off it.
+ *
+ * Goes through a `security definer` function rather than the client, because
+ * removing a row from auth.users needs privileges the anon key does not have —
+ * and the alternative, putting a service_role key in the app, would hand every
+ * install the ability to delete anybody. The function reads auth.uid() itself,
+ * so it can only ever delete its own caller. See supabase/schema.sql.
+ *
+ * Profiles, subscriptions and price changes all cascade, so there is nothing to
+ * tidy up afterwards beyond signing out locally.
+ */
+export async function deleteAccount(): Promise<void> {
+  const { error } = await supabase.rpc('delete_me');
+  if (error) throw new Error(describeError(error, 'Could not delete your account.'));
 }
 
 /**

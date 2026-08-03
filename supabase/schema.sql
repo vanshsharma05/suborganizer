@@ -191,3 +191,41 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
   after insert on auth.users
   for each row execute function public.handle_new_user();
+
+
+-- ------------------------------------------------ delete your own account --
+-- Both stores require deletion to be startable from inside the app. Apple is
+-- explicit about it (5.1.1(v)) and rejects apps that only offer a support
+-- address; Play requires an in-app route as well as a web one.
+--
+-- It has to live here rather than in the client because removing a row from
+-- auth.users needs privileges the anon key does not have — and the alternative,
+-- shipping a service_role key in the app, would hand every install the ability
+-- to delete anybody.
+--
+-- security definer runs it as the owner, and auth.uid() still resolves to the
+-- caller, so a signed-in user can only ever delete themselves. profiles,
+-- subscriptions and price_changes all cascade from auth.users, so this one
+-- statement takes the lot.
+
+create or replace function public.delete_me()
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  caller uuid := auth.uid();
+begin
+  -- Refuse rather than delete nothing, so a caller without a session gets an
+  -- error instead of a silent success.
+  if caller is null then
+    raise exception 'not signed in';
+  end if;
+
+  delete from auth.users where id = caller;
+end;
+$$;
+
+revoke all on function public.delete_me() from public, anon;
+grant execute on function public.delete_me() to authenticated;
