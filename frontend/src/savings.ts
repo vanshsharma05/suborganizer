@@ -27,6 +27,7 @@
 
 import type { PriceChange, Subscription } from './api';
 import { monthlyEquivalent } from './cycles';
+import { isDormant, unusedFor, type UsageLog } from './usage';
 import { bundlesIncluding, OVERLAP_CATEGORIES, planPriceFor } from './savings-data';
 import { trialDaysLeft } from './trials';
 
@@ -36,7 +37,8 @@ export type SavingKind =
   | 'overlap'
   | 'trial-converting'
   | 'price-rise'
-  | 'dormant';
+  | 'dormant'
+  | 'unused';
 
 /**
  * How much we trust the number.
@@ -270,6 +272,42 @@ function checkPriceRises(changes: PriceChange[], subs: Subscription[]): Saving[]
 }
 
 /**
+ * They told us they are not using it.
+ *
+ * The only check here whose input is not arithmetic on a row. Everything else
+ * in this file infers; this one repeats back an answer the user gave, which is
+ * why it is `certain` and why it is worded as their statement rather than our
+ * suspicion. Nothing fires without two things: a "no", and enough time since
+ * that "no" for it to mean a habit rather than a quiet month.
+ *
+ * Silence is never evidence. A subscription nobody has been asked about
+ * produces nothing at all — see `unusedFor` for why.
+ */
+function checkUnused(sub: Subscription, usage: UsageLog | undefined, today: Date): Saving | null {
+  if (!usage || sub.status !== 'active') return null;
+  if (!isDormant(usage, sub.id, today)) return null;
+
+  const since = unusedFor(usage, sub.id, today) ?? 0;
+  const months = Math.max(1, Math.round(since / 30));
+  const annualSaving = monthlyEquivalent(sub.amount, sub.billing_cycle) * 12;
+  if (annualSaving < MIN_ANNUAL_SAVING) return null;
+
+  return {
+    id: `unused:${sub.id}`,
+    kind: 'unused',
+    sub,
+    annualSaving,
+    currency: sub.currency ?? 'INR',
+    title: `You have not used ${sub.name} in ${months} month${months === 1 ? '' : 's'}`,
+    detail:
+      `You told us so at the last check-in. It has carried on charging since — ` +
+      `${Math.round(annualSaving)} a year at the current price.`,
+    action: `Cancel ${sub.name}, or mark it used at the next check-in`,
+    confidence: 'certain',
+  };
+}
+
+/**
  * Active, renewing, and not touched in a long time.
  *
  * Deliberately conservative: only fires when the next renewal is far enough away
@@ -334,6 +372,14 @@ export function runAudit(
      * screen whose only asset is being believed.
      */
     dismissed?: ReadonlySet<string>;
+    /**
+     * The user's own answers about what they still use.
+     *
+     * The only input to this audit that is not derived from a row. Everything
+     * else here is arithmetic and can be argued with; this cannot, because they
+     * said it.
+     */
+    usage?: UsageLog;
   } = {},
 ): Audit {
   const today = options.today ?? new Date();
@@ -351,6 +397,7 @@ export function runAudit(
       checkBundled(sub, today),
       checkAnnualSwitch(sub, today),
       checkDormant(sub),
+      checkUnused(sub, options.usage, today),
     ].filter((s): s is Saving => s !== null);
 
     savings.push(...found);
@@ -396,7 +443,11 @@ export function runAudit(
  */
 function rank(s: Saving): number {
   const byKind: Record<SavingKind, number> = {
-    'trial-converting': 5,
+    // A deadline still wins. Below that, what the user told us outranks
+    // anything we worked out for ourselves — "I do not use this" is a stronger
+    // reason to cancel than any arithmetic about a cheaper plan.
+    'trial-converting': 6,
+    unused: 5,
     bundled: 4,
     'annual-switch': 3,
     'price-rise': 2,

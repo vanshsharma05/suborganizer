@@ -135,4 +135,5 @@ export const LOCKED_LABEL: Record<SavingKind, string> = {
   'trial-converting': 'A free trial about to start charging',
   'price-rise': 'One of these quietly put its price up',
   dormant: 'You have stopped using one of these',
+  unused: 'One you told us you no longer use',
 };

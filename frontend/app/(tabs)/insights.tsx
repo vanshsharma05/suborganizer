@@ -27,7 +27,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Animated, { FadeIn, LinearTransition } from 'react-native-reanimated';
 
@@ -44,6 +44,7 @@ import { UpgradeSheet } from '@/src/paywall';
 import {
   activeIds, dismiss, readDismissals, restore, writeDismissals, type Dismissals,
 } from '@/src/dismissals';
+import { readUsage, type UsageLog } from '@/src/usage';
 
 const CONFIDENCE: Record<
   SavingConfidence,
@@ -81,6 +82,7 @@ const ICON: Record<Saving['kind'], keyof typeof Ionicons.glyphMap> = {
   'price-rise': 'trending-up',
   overlap: 'copy',
   dormant: 'pause-circle',
+  unused: 'moon',
 };
 
 export default function SavingsScreen() {
@@ -89,9 +91,30 @@ export default function SavingsScreen() {
   const { user, subs, subsLoading, priceChanges, refreshSubs, refreshPriceChanges } = useAuth();
   const { unlocked } = usePurchases();
 
+
+  /*
+   * Re-read on focus, because the tabs are frozen while anything is pushed over
+   * them.
+   *
+   * `enableFreeze` suspends an off-screen screen's subtree, and a suspended
+   * subtree does not apply context updates. Adding a subscription refreshes the
+   * list and then navigates back — but the refresh landed while this screen was
+   * frozen, so the totals came back showing what they showed before. It looked
+   * like the save had not worked.
+   *
+   * One indexed query when a tab becomes visible, which is cheap next to being
+   * wrong about someone's money.
+   */
+  useFocusEffect(
+    useCallback(() => {
+      void refreshSubs();
+    }, [refreshSubs]),
+  );
+
   const [refreshing, setRefreshing] = useState(false);
   const [upgrading, setUpgrading] = useState(false);
   const [dismissals, setDismissals] = useState<Dismissals>({});
+  const [usage, setUsage] = useState<UsageLog>({});
   /** The last thing dismissed, so it can be put back without hunting for it. */
   const [undo, setUndo] = useState<{ id: string; name: string } | null>(null);
 
@@ -103,6 +126,14 @@ export default function SavingsScreen() {
     void readDismissals().then(setDismissals);
   }, []);
 
+  // Re-read on focus, not just on mount: the check-in happens on Home, and a
+  // finding the user has just earned should be here when they switch tabs.
+  useFocusEffect(
+    useCallback(() => {
+      void readUsage().then(setUsage);
+    }, []),
+  );
+
   const hidden = useMemo(() => activeIds(dismissals), [dismissals]);
 
   const audit = useMemo(
@@ -111,8 +142,9 @@ export default function SavingsScreen() {
         primaryCurrency: primary,
         convert: (amount, from, to) => convertToPrimary(amount, from, to, rate),
         dismissed: hidden,
+        usage,
       }),
-    [subs, priceChanges, primary, rate, hidden],
+    [subs, priceChanges, primary, rate, hidden, usage],
   );
 
   const heroSize = fitText(

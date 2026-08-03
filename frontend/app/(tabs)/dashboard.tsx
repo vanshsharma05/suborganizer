@@ -12,12 +12,12 @@
  * looking equally important.
  */
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, RefreshControl, ScrollView, InteractionManager,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
@@ -39,6 +39,8 @@ import { dismissPriceChange } from '@/src/api';
 import { activeTrials, splitByTrial, trialDaysLeft, trialLabel } from '@/src/trials';
 import { findPriceRises } from '@/src/price-watch';
 import { RemindersSection } from '@/src/reminders';
+import { UsageReview } from '@/src/usage-review';
+import { dueForReview, prune, readUsage, writeUsage, type UsageLog } from '@/src/usage';
 import { getNotifPermission, requestNotifPermission, rescheduleReminders } from '@/src/notifications';
 
 const AnimatedScrollView = Animated.createAnimatedComponent(ScrollView);
@@ -128,6 +130,33 @@ export default function Dashboard() {
     user, subs, subsError, subsLoading, refreshSubs, reminders, refreshReminders, priceChanges,
     refreshPriceChanges,
   } = useAuth();
+
+
+  /*
+   * Re-read on focus, because the tabs are frozen while anything is pushed over
+   * them.
+   *
+   * `enableFreeze` suspends an off-screen screen's subtree, and a suspended
+   * subtree does not apply context updates. Adding a subscription refreshes the
+   * list and then navigates back — but the refresh landed while this screen was
+   * frozen, so the totals came back showing what they showed before. It looked
+   * like the save had not worked.
+   *
+   * One indexed query when a tab becomes visible, which is cheap next to being
+   * wrong about someone's money.
+   */
+  useFocusEffect(
+    useCallback(() => {
+      void refreshSubs();
+    }, [refreshSubs]),
+  );
+
+  const [usage, setUsage] = useState<UsageLog>({});
+  const [reviewing, setReviewing] = useState(false);
+
+  useEffect(() => {
+    void readUsage().then(setUsage);
+  }, []);
 
   const [refreshing, setRefreshing] = useState(false);
   const [notifPromptShown, setNotifPromptShown] = useState(false);
@@ -243,6 +272,29 @@ export default function Dashboard() {
       .sort((a, b) => a.renewal.localeCompare(b.renewal))
       .slice(0, 8);
   }, [charging, remindingIds]);
+
+  /**
+   * What to ask about, longest-unanswered first.
+   *
+   * Only the things actually charging: asking whether someone used a free trial
+   * is asking the wrong question, and asking about a paused subscription
+   * invites them to answer about something that is not costing them anything.
+   */
+  const reviewQueue = useMemo(() => {
+    const due = new Set(dueForReview(charging.map((c) => c.id), usage));
+    return charging.filter((c) => due.has(c.id));
+  }, [charging, usage]);
+
+  // Answers outlive the subscriptions they were about, otherwise deleting and
+  // re-adding something silently inherits a stale "not using it".
+  useEffect(() => {
+    if (subsLoading || subs.length === 0) return;
+    const tidied = prune(usage, subs.map((x) => x.id));
+    if (Object.keys(tidied).length !== Object.keys(usage).length) {
+      setUsage(tidied);
+      void writeUsage(tidied);
+    }
+  }, [subs, subsLoading, usage]);
 
   const trials = useMemo(() => activeTrials(allActive), [allActive]);
   const rises = useMemo(() => findPriceRises(priceChanges, subs), [priceChanges, subs]);
@@ -529,6 +581,32 @@ export default function Dashboard() {
           </Reveal>
         )}
 
+        {/* The one thing the audit cannot work out on its own. Shown only when
+            there is actually something to ask, and never while the list is
+            still arriving. */}
+        {!subsLoading && reviewQueue.length > 0 && (
+          <Reveal delay={180} style={s.block} testID="dashboard-review-prompt">
+            <Press onPress={() => setReviewing(true)} haptic="medium" testID="dashboard-review">
+              <Card>
+                <View style={s.rowGap}>
+                  <View style={[s.alertIcon, { backgroundColor: theme.color.brandTint }]}>
+                    <Ionicons name="hand-left" size={17} color={theme.color.brandPrimary} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.alertTitle}>
+                      Still using {reviewQueue.length === 1 ? 'this one?' : `all ${reviewQueue.length}?`}
+                    </Text>
+                    <Text style={s.alertBody}>
+                      One tap each. It is the only way we can tell you what to cancel.
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={theme.color.inkFaint} />
+                </View>
+              </Card>
+            </Press>
+          </Reveal>
+        )}
+
         {/* Two tools, equal weight. Scanning is the one that fills the app in a
             single tap, so it is not buried under the manual path. */}
         <Reveal delay={200} style={[s.block, { flexDirection: 'row', gap: 12 }]}>
@@ -614,6 +692,14 @@ export default function Dashboard() {
           </ScrollView>
         )}
       </AnimatedScrollView>
+
+      <UsageReview
+        visible={reviewing}
+        queue={reviewQueue}
+        log={usage}
+        onLog={setUsage}
+        onClose={() => setReviewing(false)}
+      />
     </View>
   );
 }

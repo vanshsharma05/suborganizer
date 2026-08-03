@@ -22,7 +22,7 @@ import {
   View, Text, StyleSheet, RefreshControl, FlatList, Modal, Pressable, ScrollView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Animated, { SlideInDown } from 'react-native-reanimated';
 import { parseISO, differenceInCalendarDays, format } from 'date-fns';
@@ -54,6 +54,26 @@ export default function SubscriptionsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { subs, subsLoading, refreshSubs, user } = useAuth();
+
+
+  /*
+   * Re-read on focus, because the tabs are frozen while anything is pushed over
+   * them.
+   *
+   * `enableFreeze` suspends an off-screen screen's subtree, and a suspended
+   * subtree does not apply context updates. Adding a subscription refreshes the
+   * list and then navigates back — but the refresh landed while this screen was
+   * frozen, so the totals came back showing what they showed before. It looked
+   * like the save had not worked.
+   *
+   * One indexed query when a tab becomes visible, which is cheap next to being
+   * wrong about someone's money.
+   */
+  useFocusEffect(
+    useCallback(() => {
+      void refreshSubs();
+    }, [refreshSubs]),
+  );
 
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('All');
