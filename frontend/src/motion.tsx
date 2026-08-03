@@ -88,7 +88,8 @@ export function Press({
   children: React.ReactNode;
   style?: StyleProp<ViewStyle>;
   scale?: number;
-  haptic?: 'light' | 'medium' | 'none';
+  /** `selection` is the flick a toggle should give — lighter than a tap on a button. */
+  haptic?: 'light' | 'medium' | 'selection' | 'none';
   disabled?: boolean;
   testID?: string;
 }) {

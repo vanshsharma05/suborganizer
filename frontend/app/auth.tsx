@@ -14,10 +14,10 @@
  * spreadsheet and "find the ₹4,000 a year you forgot about" describes a reason.
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View, Text, TextInput, StyleSheet, KeyboardAvoidingView, Platform,
-  ScrollView, ActivityIndicator,
+  ScrollView, ActivityIndicator, useWindowDimensions,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -30,6 +30,7 @@ import Animated, {
 import { useAuth } from '@/src/auth-context';
 import { theme } from '@/src/theme';
 import { Press } from '@/src/motion';
+import { looksLikeEmail } from '@/src/validate';
 
 const SELLING_POINTS: { icon: keyof typeof Ionicons.glyphMap; text: string }[] = [
   { icon: 'mail-open', text: 'Finds subscriptions hiding in your Gmail' },
@@ -76,17 +77,30 @@ function Aurora() {
 export default function AuthScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { signInWithEmail, signUpWithEmail, signInWithGoogle, user } = useAuth();
+  const { width } = useWindowDimensions();
+  const { signInWithEmail, signUpWithEmail, signInWithGoogle, resetPassword, user } = useAuth();
 
   const [showEmail, setShowEmail] = useState(false);
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [reveal, setReveal] = useState(false);
+  const [focus, setFocus] = useState<'name' | 'email' | 'password' | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [googleBusy, setGoogleBusy] = useState(false);
+
+  const emailRef = useRef<TextInput>(null);
+  const passwordRef = useRef<TextInput>(null);
+
+  /**
+   * "subscription." is the longest word on the screen and it sits on its own
+   * line by design. At a fixed 46px it runs past the edge on a 320dp phone,
+   * which turns a three-line headline into four and breaks the shape.
+   */
+  const heroSize = Math.min(46, Math.round((width - 30) / 7.02));
 
   useEffect(() => {
     if (user) router.replace('/');
@@ -96,8 +110,14 @@ export default function AuthScreen() {
     setErr(null);
     setNotice(null);
 
-    if (!email || !password || (mode === 'signup' && !name)) {
+    const address = email.trim();
+
+    if (!address || !password || (mode === 'signup' && !name.trim())) {
       setErr('Please fill in all fields');
+      return;
+    }
+    if (!looksLikeEmail(address)) {
+      setErr('That does not look like an email address');
       return;
     }
     if (mode === 'signup' && password.length < 6) {
@@ -138,6 +158,32 @@ export default function AuthScreen() {
     }
   };
 
+  /**
+   * Reports success without confirming the address has an account, which is the
+   * same thing Supabase does and for the same reason.
+   */
+  const forgotPassword = async () => {
+    setErr(null);
+    setNotice(null);
+
+    const address = email.trim();
+    if (!looksLikeEmail(address)) {
+      setErr('Type your email address first, then tap this again');
+      emailRef.current?.focus();
+      return;
+    }
+
+    setBusy(true);
+    try {
+      await resetPassword(address);
+      setNotice(`If ${address} has an account, a reset link is on its way. It lasts an hour, and has to be opened on this phone.`);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Could not send the reset email');
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <View style={s.root}>
       <LinearGradient
@@ -167,7 +213,10 @@ export default function AuthScreen() {
             <Text style={s.brandName}>SubOrganizer</Text>
           </Animated.View>
 
-          <Animated.Text entering={FadeInDown.delay(140).duration(700)} style={s.hero}>
+          <Animated.Text
+            entering={FadeInDown.delay(140).duration(700)}
+            style={[s.hero, { fontSize: heroSize, lineHeight: Math.round(heroSize * 1.13) }]}
+          >
             Every{'\n'}subscription.{'\n'}One view.
           </Animated.Text>
 
@@ -191,7 +240,13 @@ export default function AuthScreen() {
           <View style={{ flex: 1, minHeight: 24 }} />
 
           {(err ?? notice) !== null && (
-            <Animated.View entering={FadeIn.duration(280)} style={s.message}>
+            <Animated.View
+              entering={FadeIn.duration(280)}
+              style={s.message}
+              // Without this the message is drawn but never announced, so a
+              // screen-reader user taps Sign in and is told nothing at all.
+              accessibilityLiveRegion="polite"
+            >
               <Ionicons name={err !== null ? 'alert-circle' : 'mail-unread'} size={16} color="#FFFFFF" />
               <Text style={s.messageText} testID={err !== null ? 'auth-error' : 'auth-notice'}>
                 {err ?? notice}
@@ -219,6 +274,9 @@ export default function AuthScreen() {
                   setShowEmail(true);
                   setErr(null);
                 }}
+                // Tapping this mid-Google would swap the screen out from under
+                // a sheet that is still open and about to come back with a session.
+                disabled={googleBusy}
                 testID="auth-use-email"
               >
                 <View style={s.ghost}>
@@ -263,31 +321,72 @@ export default function AuthScreen() {
                   onChangeText={setName}
                   placeholder="Your name"
                   placeholderTextColor="rgba(255,255,255,0.55)"
-                  style={s.input}
+                  style={[s.input, focus === 'name' && s.inputFocused]}
                   autoCapitalize="words"
+                  autoComplete="name"
+                  returnKeyType="next"
+                  onSubmitEditing={() => emailRef.current?.focus()}
+                  submitBehavior="submit"
+                  onFocus={() => setFocus('name')}
+                  onBlur={() => setFocus(null)}
                   testID="auth-name-input"
                 />
               )}
               <TextInput
+                ref={emailRef}
                 value={email}
                 onChangeText={setEmail}
                 placeholder="you@example.com"
                 placeholderTextColor="rgba(255,255,255,0.55)"
                 keyboardType="email-address"
                 autoCapitalize="none"
+                autoCorrect={false}
                 autoComplete="email"
-                style={s.input}
+                returnKeyType="next"
+                onSubmitEditing={() => passwordRef.current?.focus()}
+                submitBehavior="submit"
+                onFocus={() => setFocus('email')}
+                onBlur={() => setFocus(null)}
+                style={[s.input, focus === 'email' && s.inputFocused]}
                 testID="auth-email-input"
               />
-              <TextInput
-                value={password}
-                onChangeText={setPassword}
-                placeholder={mode === 'signup' ? 'At least 6 characters' : 'Password'}
-                placeholderTextColor="rgba(255,255,255,0.55)"
-                secureTextEntry
-                style={s.input}
-                testID="auth-password-input"
-              />
+
+              <View style={s.field}>
+                <TextInput
+                  ref={passwordRef}
+                  value={password}
+                  onChangeText={setPassword}
+                  placeholder={mode === 'signup' ? 'At least 6 characters' : 'Password'}
+                  placeholderTextColor="rgba(255,255,255,0.55)"
+                  secureTextEntry={!reveal}
+                  autoCapitalize="none"
+                  // Tells a password manager whether to offer the saved one or
+                  // to offer to save a new one. Without it, it offers neither.
+                  autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
+                  returnKeyType="go"
+                  onSubmitEditing={submit}
+                  onFocus={() => setFocus('password')}
+                  onBlur={() => setFocus(null)}
+                  style={[s.input, s.inputWithButton, focus === 'password' && s.inputFocused]}
+                  testID="auth-password-input"
+                />
+                {/* Typing a password you cannot see, on a phone keyboard, to an
+                    account you are creating this second. */}
+                <Press
+                  onPress={() => setReveal((v) => !v)}
+                  haptic="selection"
+                  style={s.reveal}
+                  testID="auth-reveal"
+                >
+                  <View style={s.revealHit}>
+                    <Ionicons
+                      name={reveal ? 'eye-off-outline' : 'eye-outline'}
+                      size={20}
+                      color="rgba(255,255,255,0.8)"
+                    />
+                  </View>
+                </Press>
+              </View>
 
               <Press onPress={submit} disabled={busy} haptic="medium" testID="auth-submit">
                 <View style={[s.primary, { marginTop: 5 }]}>
@@ -300,6 +399,14 @@ export default function AuthScreen() {
                   )}
                 </View>
               </Press>
+
+              {mode === 'login' && (
+                <Press onPress={forgotPassword} disabled={busy} testID="auth-forgot">
+                  <View style={s.linkRow}>
+                    <Text style={s.linkText}>Forgotten your password?</Text>
+                  </View>
+                </Press>
+              )}
 
               <Press
                 onPress={() => {
@@ -332,9 +439,10 @@ const s = StyleSheet.create({
   },
   brandName: { color: '#FFFFFF', fontSize: 15, fontWeight: '700', letterSpacing: 0.6 },
 
+  // fontSize and lineHeight are set per device; see heroSize above.
   hero: {
-    color: '#FFFFFF', fontSize: 46, fontWeight: '800',
-    letterSpacing: -2, lineHeight: 52, marginTop: 40,
+    color: '#FFFFFF', fontWeight: '800',
+    letterSpacing: -2, marginTop: 40,
   },
 
   points: { gap: 13, marginTop: 26 },
@@ -387,5 +495,21 @@ const s = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.2)',
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.24)',
     paddingHorizontal: 18, color: '#FFFFFF', fontSize: 16, fontWeight: '600',
+  },
+  /** Which box the keyboard is typing into, which nothing said before. */
+  inputFocused: {
+    borderColor: 'rgba(255,255,255,0.9)',
+    backgroundColor: 'rgba(0,0,0,0.28)',
+  },
+  inputWithButton: { paddingRight: 52 },
+
+  field: { justifyContent: 'center' },
+  reveal: { position: 'absolute', right: 5 },
+  revealHit: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+
+  linkRow: { alignItems: 'center', paddingVertical: 13 },
+  linkText: {
+    color: 'rgba(255,255,255,0.86)', fontSize: 13.5, fontWeight: '700',
+    textDecorationLine: 'underline',
   },
 });

@@ -52,6 +52,10 @@ type AuthCtx = {
     password: string,
   ) => Promise<{ needsConfirmation: boolean }>;
   signInWithGoogle: () => Promise<void>;
+  /** Emails a recovery link. Resolves whether or not the address has an account. */
+  resetPassword: (email: string) => Promise<void>;
+  /** Sets a new password for the session a recovery link opened. */
+  updatePassword: (password: string) => Promise<void>;
   logout: () => Promise<void>;
   refreshUser: () => Promise<void>;
   subs: Subscription[];
@@ -276,6 +280,35 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (exchangeError) throw new Error(describeError(exchangeError, 'Google sign-in failed.'));
   };
 
+  /**
+   * Sends the recovery email.
+   *
+   * Deliberately silent about whether the address exists. Reporting "no account
+   * with that email" turns this form into a way to find out who has registered,
+   * and the person who genuinely typo'd their own address is helped just as well
+   * by an email that never arrives as by a message telling them so.
+   *
+   * The link lands on `reset-password`, which finishes the exchange. PKCE keeps
+   * the verifier on this device, so the reset has to be completed on the phone
+   * that asked for it — which is also what stops a forwarded email working.
+   */
+  const resetPassword = async (email: string) => {
+    const redirectTo = AuthSession.makeRedirectUri({
+      scheme: appScheme(),
+      path: 'reset-password',
+    });
+
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo });
+    // A missing account is not reported by Supabase either, so anything arriving
+    // here is a transport or configuration failure and is worth surfacing.
+    if (error) throw new Error(describeError(error, 'Could not send the reset email.'));
+  };
+
+  const updatePassword = async (password: string) => {
+    const { error } = await supabase.auth.updateUser({ password });
+    if (error) throw new Error(describeError(error, 'Could not set that password.'));
+  };
+
   const logout = async () => {
     // Drop the Gmail grant too — leaving a token that can read someone's inbox
     // on a signed-out device is not a trade worth making for convenience.
@@ -308,6 +341,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signInWithEmail,
         signUpWithEmail,
         signInWithGoogle,
+        resetPassword,
+        updatePassword,
         logout,
         refreshUser,
         subs,
