@@ -16,7 +16,7 @@
  */
 
 import React, { useEffect, useState } from 'react';
-import { Modal, StyleSheet, Text, View } from 'react-native';
+import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import Animated, { FadeIn, SlideInDown } from 'react-native-reanimated';
@@ -70,15 +70,16 @@ export function UsageReview({
       onRequestClose={onClose}
       statusBarTranslucent
     >
-      <Press
-        onPress={onClose}
-        haptic="none"
+      {/* A plain Pressable, like every other sheet in the app. Press splits its
+          style — position outward, appearance inward — so a style that is
+          nothing but `absoluteFillObject` plus a colour leaves the inner view
+          with a tint and no dimensions, and the scrim never draws. */}
+      <Pressable
         style={s.backdrop}
+        onPress={onClose}
         accessibilityLabel="Close the check-in"
         testID="review-backdrop"
-      >
-        <View />
-      </Press>
+      />
 
       <Animated.View
         entering={SlideInDown.duration(300)}
