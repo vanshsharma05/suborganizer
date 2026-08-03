@@ -51,8 +51,18 @@ type Row = {
   value?: string;
   colour: string;
   destructive?: boolean;
+  /**
+   * What the row does, drawn on its right edge.
+   *
+   * A chevron is a promise that something opens. Currency does not open
+   * anything — it flips between two values in place — and Restore simply runs.
+   * Pointing a chevron at either sets up a screen that never arrives.
+   */
+  trailing?: 'chevron' | 'swap' | 'none';
   onPress: () => void;
 };
+
+const TRAILING_ICON = { chevron: 'chevron-forward', swap: 'swap-horizontal' } as const;
 
 function Group({ title, rows }: { title: string; rows: Row[] }) {
   return (
@@ -71,7 +81,13 @@ function Group({ title, rows }: { title: string; rows: Row[] }) {
               {r.value !== undefined && (
                 <Text style={s.rowValue} numberOfLines={1}>{r.value}</Text>
               )}
-              <Ionicons name="chevron-forward" size={16} color={theme.color.inkFaint} />
+              {r.trailing !== 'none' && (
+                <Ionicons
+                  name={TRAILING_ICON[r.trailing ?? 'chevron']}
+                  size={16}
+                  color={theme.color.inkFaint}
+                />
+              )}
             </View>
           </Press>
         ))}
@@ -101,9 +117,32 @@ export default function ProfileScreen() {
     }, []),
   );
 
-  const doLogout = async () => {
-    await logout();
-    router.replace('/auth');
+  const doLogout = () => {
+    /*
+     * Asks first, because of where it sits.
+     *
+     * Logging out is not destructive — the subscriptions are on the server —
+     * but it is one row above Delete account, both are red, and it also drops
+     * the Gmail grant on the way out. Getting back in means a password and a
+     * fresh consent screen, which is a lot to pay for a mis-tap.
+     */
+    Alert.alert(
+      'Log out?',
+      'Your subscriptions stay on your account. You will need to sign in again, and reconnect Gmail if you were using the scan.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Log out',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              await logout();
+              router.replace('/auth');
+            })();
+          },
+        },
+      ],
+    );
   };
 
   const cyclePrimaryCurrency = async () => {
@@ -175,6 +214,7 @@ export default function ProfileScreen() {
       label: 'Currency',
       value: savingCur ? '…' : `${CURRENCY_NAME[primary] ?? primary} ${symbolFor(primary)}`,
       colour: theme.color.brandPrimary,
+      trailing: 'swap',
       onPress: cyclePrimaryCurrency,
     },
     {
@@ -212,6 +252,7 @@ export default function ProfileScreen() {
       icon: 'refresh-outline',
       label: 'Restore purchases',
       colour: theme.color.inkSoft,
+      trailing: 'none',
       onPress: async () => {
         await refreshPurchases();
         Alert.alert(
@@ -228,6 +269,7 @@ export default function ProfileScreen() {
             icon: 'bug-outline' as const,
             label: 'Reset purchases (dev)',
             colour: theme.color.inkMuted,
+            trailing: 'none' as const,
             onPress: async () => {
               await resetPurchases();
               Alert.alert('Reset', 'Back to owning nothing. The paywall is live again.');
@@ -307,10 +349,11 @@ export default function ProfileScreen() {
           )}
         </Reveal>
 
+        {/* Counts only. Currency used to sit here as a third tile, which both
+            duplicated the row below and put a setting among two facts. */}
         <Reveal delay={70} style={s.statsRow}>
-          <Stat label="Active" value={String(active)} />
+          <Stat label="Active" value={String(active)} tone="brand" />
           <Stat label="Tracked" value={String(subs.length)} />
-          <Stat label="Currency" value={symbolFor(primary)} tone="brand" />
         </Reveal>
 
         {curError !== null && <Text style={s.err}>{curError}</Text>}
