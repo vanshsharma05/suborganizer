@@ -116,11 +116,30 @@ export default function ScanScreen() {
     }
   };
 
-  const disconnect = async () => {
+  const forgetGmail = async () => {
     await disconnectGmail();
     setConnection(null);
     setResult(null);
     setPhase('idle');
+  };
+
+  /**
+   * Asks first. The Account screen already did; this one did not, and this is
+   * where it costs more — the button sits a thumb's width from Back, and a
+   * mis-tap here throws away a scan that took two minutes to run along with the
+   * grant needed to run another.
+   */
+  const disconnect = () => {
+    Alert.alert(
+      'Disconnect Gmail?',
+      result
+        ? 'This clears the results on screen, and you will have to grant access again before you can scan.'
+        : 'You will have to grant access again before you can scan.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Disconnect', style: 'destructive', onPress: () => void forgetGmail() },
+      ],
+    );
   };
 
   const runScan = async () => {
@@ -203,27 +222,48 @@ export default function ScanScreen() {
     if (!chosen.length) return;
     setPhase('importing');
 
-    const outcome = await applyCandidates(chosen);
-    await refreshSubs();
+    try {
+      const outcome = await applyCandidates(chosen);
+      await refreshSubs();
 
-    // Drop what landed, so a second tap cannot create a duplicate row. Anything
-    // that failed stays on screen and stays ticked, ready to retry.
-    const failed = new Set(outcome.failed);
-    const applied = new Set(chosen.filter((c) => !failed.has(c.name)).map((c) => c.key));
-    setResult((prev) =>
-      prev ? { ...prev, candidates: prev.candidates.filter((c) => !applied.has(c.key)) } : prev,
-    );
-    setSelected((prev) => new Set([...prev].filter((k) => !applied.has(k))));
+      // Drop what landed, so a second tap cannot create a duplicate row. Anything
+      // that failed stays on screen and stays ticked, ready to retry.
+      const failed = new Set(outcome.failed);
+      const applied = new Set(chosen.filter((c) => !failed.has(c.name)).map((c) => c.key));
+      setResult((prev) =>
+        prev ? { ...prev, candidates: prev.candidates.filter((c) => !applied.has(c.key)) } : prev,
+      );
+      setSelected((prev) => new Set([...prev].filter((k) => !applied.has(k))));
 
-    const parts: string[] = [];
-    if (outcome.imported) parts.push(`Added ${outcome.imported}`);
-    if (outcome.reconciled) parts.push(`Updated ${outcome.reconciled}`);
-    if (outcome.failed.length) parts.push(`Failed: ${outcome.failed.join(', ')}`);
+      const parts: string[] = [];
+      if (outcome.imported) parts.push(`Added ${outcome.imported}`);
+      if (outcome.reconciled) parts.push(`Updated ${outcome.reconciled}`);
 
-    Alert.alert('Gmail scan', parts.join(' · ') || 'Nothing to apply', [
-      { text: 'Done', onPress: () => router.back() },
-    ]);
-    setPhase('results');
+      /*
+       * Leaving is only offered when there is nothing left to do.
+       *
+       * The code above deliberately keeps failures on screen and ticked so they
+       * can be retried — and then the alert's only button walked away from them.
+       * A partial failure now keeps the user here, next to the rows that need
+       * the second tap.
+       */
+      if (outcome.failed.length > 0) {
+        const done = parts.length > 0 ? `${parts.join(' · ')}. ` : '';
+        Alert.alert(
+          parts.length > 0 ? 'Partly added' : 'Could not add these',
+          `${done}Could not add: ${outcome.failed.join(', ')}. They are still ticked below — tap Add again to retry.`,
+          [{ text: 'Stay here', style: 'cancel' }],
+        );
+      } else {
+        Alert.alert('Gmail scan', parts.join(' · ') || 'Nothing to apply', [
+          { text: 'Done', onPress: () => router.back() },
+        ]);
+      }
+    } finally {
+      // In `finally` so a failure anywhere above cannot strand the screen in
+      // `importing`, where the Add button stays disabled with no way back.
+      setPhase('results');
+    }
   };
 
   // Low-confidence rows are kept but quarantined: they are guesses, and mixing
