@@ -588,18 +588,27 @@ const s = StyleSheet.create({
 
   label: { ...theme.type.overline, color: theme.color.inkMuted, marginTop: 26, marginBottom: 10 },
 
-  amountRow: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  // One field, not a tile and a floating number. The currency swatch is the
+  // left end of the same control, divided by a hairline rather than a gap, so
+  // the amount reads as being inside something rather than adrift beside it.
+  amountRow: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: theme.color.surfaceSecondary,
+    borderRadius: theme.radius.lg,
+    paddingRight: 20,
+  },
   currency: {
     alignItems: 'center', justifyContent: 'center', gap: 1,
-    width: 66, height: 66, borderRadius: theme.radius.md,
-    backgroundColor: theme.color.surfaceSecondary,
+    width: 66, height: 72,
+    borderRightWidth: 1, borderRightColor: theme.color.border,
   },
   currencySymbol: { color: theme.color.ink, fontSize: 24, fontWeight: '800', lineHeight: 28 },
   currencySwap: { flexDirection: 'row', alignItems: 'center', gap: 2 },
   currencyCode: { color: theme.color.inkMuted, fontSize: 9.5, fontWeight: '800', letterSpacing: 0.4 },
   amountInput: {
-    flex: 1, fontSize: 46, fontWeight: '800', color: theme.color.ink,
-    letterSpacing: -2, padding: 0, includeFontPadding: false,
+    flex: 1, height: 72, fontSize: 40, fontWeight: '800', color: theme.color.ink,
+    letterSpacing: -1.6, paddingHorizontal: 18, paddingVertical: 0,
+    includeFontPadding: false, textAlignVertical: 'center',
   },
 
   catGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },

@@ -116,8 +116,36 @@ export function Press({
     pressed.value = withSpring(1, theme.motion.press);
   };
 
+  /*
+   * How this control sits in its parent, lifted onto the Pressable.
+   *
+   * `style` goes on the animated view inside, because that is the thing being
+   * scaled. But the Pressable is what the parent actually lays out, so a
+   * `flex: 1` meant for a row never reached anything — the Pressable sized
+   * itself to its text and the caller got a control that would not share the
+   * row. Invisible in a column, where children stretch by default, and the
+   * reason a segmented control's slots bunched to one side.
+   *
+   * Only the properties that decide participation in the parent's layout are
+   * copied up. Everything visual stays inside, where it already worked, and
+   * applying these in both places is harmless — the inner view simply fills
+   * the box the outer one won.
+   */
+  const flat = StyleSheet.flatten(style) ?? {};
+  const outer: ViewStyle = {
+    flex: flat.flex,
+    flexGrow: flat.flexGrow,
+    flexShrink: flat.flexShrink,
+    flexBasis: flat.flexBasis,
+    alignSelf: flat.alignSelf,
+    width: flat.width,
+    minWidth: flat.minWidth,
+    maxWidth: flat.maxWidth,
+  };
+
   return (
     <Pressable
+      style={outer}
       onPressIn={tap}
       onPressOut={() => {
         pressed.value = withSpring(0, theme.motion.press);

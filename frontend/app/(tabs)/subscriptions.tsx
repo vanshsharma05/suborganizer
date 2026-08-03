@@ -495,12 +495,21 @@ const s = StyleSheet.create({
   row: {
     flexDirection: 'row', alignItems: 'center', gap: 13,
     backgroundColor: theme.color.raised,
-    borderRadius: theme.radius.lg, padding: 14, paddingLeft: 18,
-    overflow: 'hidden',
+    borderRadius: theme.radius.lg, padding: 14, paddingLeft: 22,
+    // No `overflow: hidden`. With a 20pt radius and Android elevation it clipped
+    // the edge-to-edge stripe into a lens that read as a tab stuck to the side
+    // of the card — and that same trio is what makes this list expensive to
+    // scroll, since every row would be composited offscreen.
     ...theme.shadow.sm,
   },
   rowPaused: { opacity: 0.6 },
-  stripe: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 5 },
+  // An inset pill rather than a flush edge. Nothing to clip, so nothing to
+  // fight the corner radius, and it reads as a marker on the card rather than
+  // a piece of the card that came loose.
+  stripe: {
+    position: 'absolute', left: 8, top: 16, bottom: 16,
+    width: 4, borderRadius: 2,
+  },
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   name: { ...theme.type.bodyStrong, color: theme.color.ink, fontSize: 15.5, flexShrink: 1 },
   meta: { ...theme.type.caption, color: theme.color.inkMuted },
