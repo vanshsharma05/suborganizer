@@ -126,21 +126,30 @@ export function Press({
    * row. Invisible in a column, where children stretch by default, and the
    * reason a segmented control's slots bunched to one side.
    *
-   * Only the properties that decide participation in the parent's layout are
-   * copied up. Everything visual stays inside, where it already worked, and
-   * applying these in both places is harmless — the inner view simply fills
-   * the box the outer one won.
+   * The split is by role: anything deciding where this sits in its parent —
+   * flex, position, margins, alignSelf — belongs on the Pressable, and
+   * everything describing how it looks stays on the animated view. Position
+   * especially: an eye button styled `position: absolute` was landing in normal
+   * flow and pushing the field it was meant to sit inside.
+   *
+   * The effect is that Press lays out exactly like the View a caller thinks
+   * they are styling, which is the only way this stops surprising people.
    */
-  const flat = StyleSheet.flatten(style) ?? {};
+  const {
+    flex, flexGrow, flexShrink, flexBasis, alignSelf,
+    width, minWidth, maxWidth,
+    position, top, right, bottom, left, zIndex,
+    margin, marginTop, marginRight, marginBottom, marginLeft,
+    marginHorizontal, marginVertical,
+    ...inner
+  } = StyleSheet.flatten(style) ?? {};
+
   const outer: ViewStyle = {
-    flex: flat.flex,
-    flexGrow: flat.flexGrow,
-    flexShrink: flat.flexShrink,
-    flexBasis: flat.flexBasis,
-    alignSelf: flat.alignSelf,
-    width: flat.width,
-    minWidth: flat.minWidth,
-    maxWidth: flat.maxWidth,
+    flex, flexGrow, flexShrink, flexBasis, alignSelf,
+    width, minWidth, maxWidth,
+    position, top, right, bottom, left, zIndex,
+    margin, marginTop, marginRight, marginBottom, marginLeft,
+    marginHorizontal, marginVertical,
   };
 
   return (
@@ -158,7 +167,7 @@ export function Press({
       accessibilityState={{ disabled: disabled === true }}
       testID={testID}
     >
-      <Animated.View style={[style, animated, disabled === true && { opacity: 0.45 }]}>
+      <Animated.View style={[inner, animated, disabled === true && { opacity: 0.45 }]}>
         {children}
       </Animated.View>
     </Pressable>

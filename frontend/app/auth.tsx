@@ -98,19 +98,15 @@ export default function AuthScreen() {
   const scrollRef = useRef<ScrollView>(null);
 
   /**
-   * Brings the field you just tapped above the keyboard.
+   * A backstop, not the mechanism.
    *
-   * Android resizes the window rather than overlaying, so the form — which is
-   * the last thing in the scroll view — ends up below the fold, and nothing
-   * scrolls it back. You could see the keyboard and not the box you were
-   * typing into.
-   *
-   * `scrollToEnd` is exact here rather than approximate: the inputs and their
-   * buttons *are* the end of the content. The delay lets the resize land first,
-   * otherwise it scrolls to where the bottom used to be.
+   * The form is laid out near the top once it opens, so on most phones nothing
+   * needs scrolling at all. This covers the small screen where even the compact
+   * layout overflows: it runs after the window has finished resizing, and does
+   * nothing when the content already fits.
    */
   const revealForm = () => {
-    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 120);
+    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 160);
   };
 
   /**
@@ -118,14 +114,7 @@ export default function AuthScreen() {
    * line by design. At a fixed 46px it runs past the edge on a 320dp phone,
    * which turns a three-line headline into four and breaks the shape.
    */
-  const fullHero = Math.min(46, Math.round((width - 30) / 7.02));
-
-  /*
-   * The headline is the pitch, and the pitch is over once someone has asked for
-   * the form. Shrinking it there hands roughly 120pt of vertical space to the
-   * thing being typed into, before the keyboard has even opened.
-   */
-  const heroSize = showEmail ? Math.round(fullHero * 0.58) : fullHero;
+  const heroSize = Math.min(46, Math.round((width - 30) / 7.02));
 
   useEffect(() => {
     if (user) router.replace('/');
@@ -239,12 +228,18 @@ export default function AuthScreen() {
             <Text style={s.brandName}>SubOrganizer</Text>
           </Animated.View>
 
-          <Animated.Text
-            entering={FadeInDown.delay(140).duration(700)}
-            style={[s.hero, { fontSize: heroSize, lineHeight: Math.round(heroSize * 1.13) }]}
-          >
-            Every{'\n'}subscription.{'\n'}One view.
-          </Animated.Text>
+          {showEmail ? (
+            // Three lines of pitch is 130pt the person typing does not need.
+            // One line keeps the screen from looking decapitated.
+            <Text style={s.heroCompact}>Every subscription. One view.</Text>
+          ) : (
+            <Animated.Text
+              entering={FadeInDown.delay(140).duration(700)}
+              style={[s.hero, { fontSize: heroSize, lineHeight: Math.round(heroSize * 1.13) }]}
+            >
+              Every{'\n'}subscription.{'\n'}One view.
+            </Animated.Text>
+          )}
 
           {!showEmail && (
             <View style={s.points}>
@@ -263,7 +258,12 @@ export default function AuthScreen() {
             </View>
           )}
 
-          <View style={{ flex: 1, minHeight: 24 }} />
+          {/* The spacer pins the Google button to the bottom, which is right
+              while this is still a pitch. Once the form is open the keyboard
+              owns half the screen, and pinning to the bottom is exactly what
+              puts the inputs underneath it — so the form starts directly below
+              the headline instead. */}
+          {showEmail ? <View style={{ height: 20 }} /> : <View style={{ flex: 1, minHeight: 24 }} />}
 
           {(err ?? notice) !== null && (
             <Animated.View
@@ -472,6 +472,10 @@ const s = StyleSheet.create({
   hero: {
     color: '#FFFFFF', fontWeight: '800',
     letterSpacing: -2, marginTop: 40,
+  },
+  heroCompact: {
+    color: 'rgba(255,255,255,0.92)', fontSize: 17, fontWeight: '800',
+    letterSpacing: -0.5, marginTop: 22,
   },
 
   points: { gap: 13, marginTop: 26 },
