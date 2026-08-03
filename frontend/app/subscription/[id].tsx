@@ -18,9 +18,10 @@
  * then everything optional.
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   View, Text, StyleSheet, TextInput, ScrollView, KeyboardAvoidingView, Platform, Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, useRouter } from 'expo-router';
@@ -32,6 +33,7 @@ import { theme, CATEGORIES, CATEGORY_COLORS } from '@/src/theme';
 import { useAuth } from '@/src/auth-context';
 import {
   createSubscription, deleteSubscription, toggleSubscription, updateSubscription,
+  type Subscription,
 } from '@/src/api';
 import { BrandAvatar, Button, Field, IconButton, Segmented } from '@/src/ui';
 import { Press, Reveal } from '@/src/motion';
@@ -78,14 +80,78 @@ function PickerRow({
   );
 }
 
+/**
+ * Works out which subscription is being edited before the form exists.
+ *
+ * The form seeds every field from `existing` in `useState` initialisers, and
+ * those run once. If the list had not arrived yet, `existing` was undefined and
+ * the whole form initialised blank — while the header still said "Edit" and the
+ * id in the URL still pointed at a real subscription. Saving from there wrote
+ * those blanks over the record, losing its notes, logo, trial dates and paused
+ * state.
+ *
+ * That is reachable without any deep linking: Android may kill and restore a
+ * screen, and expo-router restores the route while the list starts empty.
+ *
+ * So the form is not mounted until there is something to seed it with, and the
+ * key makes it remount if the identity ever changes underneath it.
+ */
 export default function SubscriptionForm() {
-  const insets = useSafeAreaInsets();
-  const router = useRouter();
   const { id } = useLocalSearchParams<{ id: string }>();
   const isNew = !id || id === 'new';
-  const { subs, refreshSubs } = useAuth();
+  const { subs, subsLoading } = useAuth();
 
   const existing = !isNew ? subs.find((x) => x.id === id) : undefined;
+
+  if (!isNew && !existing) return <Resolving loading={subsLoading} />;
+
+  return <Form key={existing?.id ?? 'new'} id={id} isNew={isNew} existing={existing} />;
+}
+
+/** Holds the screen while the list loads, and admits it when the id is gone. */
+function Resolving({ loading }: { loading: boolean }) {
+  const insets = useSafeAreaInsets();
+  const router = useRouter();
+
+  return (
+    <View style={[s.resolving, { paddingTop: insets.top + 8 }]}>
+      <View style={s.resolvingHead}>
+        <IconButton icon="close" onPress={() => router.back()} size={40} testID="form-close" />
+      </View>
+      <View style={s.resolvingBody}>
+        {loading ? (
+          <>
+            <ActivityIndicator color={theme.color.brand} />
+            <Text style={s.resolvingText}>Loading this subscription</Text>
+          </>
+        ) : (
+          <>
+            <Ionicons name="help-circle-outline" size={34} color={theme.color.inkMuted} />
+            <Text style={s.resolvingText}>That subscription is no longer here</Text>
+            <Button
+              label="Go back"
+              variant="ghost"
+              size="md"
+              onPress={() => router.back()}
+              testID="form-not-found-back"
+            />
+          </>
+        )}
+      </View>
+    </View>
+  );
+}
+
+function Form({
+  id, isNew, existing,
+}: {
+  id: string;
+  isNew: boolean;
+  existing?: Subscription;
+}) {
+  const insets = useSafeAreaInsets();
+  const router = useRouter();
+  const { refreshSubs } = useAuth();
 
   const [name, setName] = useState(existing?.name ?? '');
   const [amount, setAmount] = useState(existing?.amount ? String(existing.amount) : '');
@@ -104,6 +170,44 @@ export default function SubscriptionForm() {
   const [pickingRenewal, setPickingRenewal] = useState(false);
   const [pickingTrialEnd, setPickingTrialEnd] = useState(false);
   const [showMore, setShowMore] = useState(!isNew);
+
+  /**
+   * What the form looked like when it opened.
+   *
+   * Captured on the first render, when every piece of state still holds its
+   * seeded value, so comparing against it says whether anything has been
+   * touched. Closing used to throw the lot away silently — on a form with
+   * eleven inputs, one mis-tap on an unlabelled X.
+   */
+  const opened = useRef({
+    name, amount, currency, cycle, category, domain, notes,
+    reminderDays, date, isTrial, trialEnds,
+  }).current;
+
+  const dirty =
+    name !== opened.name ||
+    amount !== opened.amount ||
+    currency !== opened.currency ||
+    cycle !== opened.cycle ||
+    category !== opened.category ||
+    domain !== opened.domain ||
+    notes !== opened.notes ||
+    reminderDays !== opened.reminderDays ||
+    date !== opened.date ||
+    isTrial !== opened.isTrial ||
+    trialEnds !== opened.trialEnds;
+
+  const close = () => {
+    if (!dirty) return router.back();
+    Alert.alert(
+      'Discard your changes?',
+      isNew ? 'This subscription will not be added.' : 'Your edits will not be saved.',
+      [
+        { text: 'Keep editing', style: 'cancel' },
+        { text: 'Discard', style: 'destructive', onPress: () => router.back() },
+      ],
+    );
+  };
 
   const numeric = Number.parseFloat(amount);
   const valid = Number.isFinite(numeric) && numeric >= 0;
@@ -134,6 +238,9 @@ export default function SubscriptionForm() {
     if (!name.trim()) return setErr('Give it a name.');
     if (!amount.trim()) return setErr('Enter what it costs.');
     if (!valid) return setErr('That amount does not look right.');
+    // is_trial with no end date leaves trialDaysLeft with nothing to read, so
+    // the row renders as a trial that never ends and never warns.
+    if (isTrial && trialEnds === null) return setErr('Pick the day the trial ends.');
 
     setBusy(true);
     try {
@@ -194,7 +301,7 @@ export default function SubscriptionForm() {
   return (
     <View style={{ flex: 1, backgroundColor: theme.color.surface }}>
       <View style={[s.header, { paddingTop: insets.top + 8 }]}>
-        <IconButton icon="close" onPress={() => router.back()} size={40} testID="form-close" />
+        <IconButton icon="close" onPress={close} size={40} testID="form-close" />
         <Text style={s.headerTitle}>{isNew ? 'New subscription' : 'Edit'}</Text>
         {existing ? (
           <View style={{ flexDirection: 'row', gap: 6 }}>
@@ -546,6 +653,14 @@ const s = StyleSheet.create({
     backgroundColor: theme.color.errorTint, borderRadius: theme.radius.md, padding: 13,
   },
   errorText: { flex: 1, color: theme.color.error, ...theme.type.small },
+
+  resolving: { flex: 1, backgroundColor: theme.color.surface },
+  resolvingHead: { paddingHorizontal: 14, paddingBottom: 10 },
+  resolvingBody: {
+    flex: 1, alignItems: 'center', justifyContent: 'center',
+    gap: 14, paddingHorizontal: 40, paddingBottom: 80,
+  },
+  resolvingText: { ...theme.type.body, color: theme.color.inkSoft, textAlign: 'center' },
 
   footer: {
     position: 'absolute', left: 0, right: 0, bottom: 0,

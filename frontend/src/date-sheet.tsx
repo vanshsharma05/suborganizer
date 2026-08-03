@@ -11,7 +11,7 @@
  * lets someone find the 14th by looking rather than by scrolling.
  */
 
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -43,6 +43,22 @@ export function DateSheet({
   const [month, setMonth] = useState(() => startOfMonth(selected));
 
   const today = startOfLocalDay(new Date());
+
+  /*
+   * Back to the selected month each time the sheet opens.
+   *
+   * The sheet never unmounts — Modal only toggles `visible` — so `month` kept
+   * wherever the user had browsed to. Someone who paged forward to March,
+   * changed their mind and closed, reopened onto March with their actual
+   * August date nowhere on screen and nothing selected anywhere in the grid.
+   */
+  const selectedISO = toISODate(selected);
+  useEffect(() => {
+    if (visible) setMonth(startOfMonth(selected));
+    // `selected` is a fresh Date object every render; its ISO day is what
+    // actually decides which month to show.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, selectedISO]);
 
   // Whole weeks, so the grid is always rectangular and the columns line up with
   // the weekday header no matter which day the month starts on.
