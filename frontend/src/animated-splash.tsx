@@ -1,5 +1,6 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { StyleSheet, View, useWindowDimensions } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import Animated, {
   Easing,
@@ -12,15 +13,24 @@ import Animated, {
 import { theme } from './theme';
 
 /**
- * Launch animation that plays once, directly after the native splash.
+ * Launch animation that plays directly after the native splash.
  *
- * Timeline (~1.75s total):
+ * It plays in full exactly once. A brand animation is a pleasure the first time
+ * and a toll every time after — this app is opened to check a number, and 1.75
+ * seconds of unskippable logo before you can touch anything is a real cost paid
+ * on every single launch. So the introduction happens once, and returning users
+ * get the same mark and the same motion in about a third of the time.
+ *
+ * First launch (~1.75s):
  *   0ms     cream field, coral diamond at rest — pixel-matched to the native
  *           splash so the handoff between the two is invisible
  *   100ms   the diamond expands until its gradient fills the screen
  *   450ms   wordmark rises and fades in
  *   570ms   tagline follows
  *   1450ms  the whole overlay cross-fades into the app
+ *
+ * Every launch after (~640ms): the same expansion, no wordmark, straight into
+ * the fade. Still branded, no longer a wait.
  */
 
 // expo-splash-screen renders splash-icon.png at imageWidth 200, and the mark
@@ -30,17 +40,86 @@ const MARK_BBOX = 140;
 const SIDE = MARK_BBOX / Math.SQRT2; // a square rotated 45deg spans side * sqrt2
 const RADIUS = SIDE * 0.14; // same ratio as the app icon
 
-const EXPAND_DELAY = 100;
-const EXPAND_MS = 650;
-const WORD_DELAY = 450;
-const WORD_MS = 450;
-const TAG_DELAY = 570;
-const TAG_MS = 450;
-const HOLD_UNTIL = 1450;
-const FADE_MS = 300;
+const KEY = 'splash.played.v1';
 
-export function AnimatedSplash({ onFinish }: { onFinish: () => void }) {
+type Plan = {
+  expandDelay: number;
+  expandMs: number;
+  /** Wordmark and tagline are the introduction; returning users skip them. */
+  showText: boolean;
+  wordDelay: number;
+  wordMs: number;
+  tagDelay: number;
+  tagMs: number;
+  hold: number;
+  fade: number;
+};
+
+const FULL: Plan = {
+  expandDelay: 100, expandMs: 650,
+  showText: true,
+  wordDelay: 450, wordMs: 450,
+  tagDelay: 570, tagMs: 450,
+  hold: 1450, fade: 300,
+};
+
+const QUICK: Plan = {
+  expandDelay: 0, expandMs: 380,
+  showText: false,
+  wordDelay: 0, wordMs: 0,
+  tagDelay: 0, tagMs: 0,
+  hold: 380, fade: 260,
+};
+
+/**
+ * Started at import rather than on mount, so the read is already in flight by
+ * the time React gets here. Resolving to `false` on failure is the safe way
+ * round: the worst case is a returning user seeing the long version again,
+ * where the opposite would rob a first-time user of the introduction entirely.
+ */
+const playedBefore: Promise<boolean> = AsyncStorage.getItem(KEY)
+  .then((v) => v === '1')
+  .catch(() => false);
+
+/** Never let a stalled read hold the app on a motionless splash. */
+const DECIDE_TIMEOUT_MS = 400;
+
+/**
+ * The longest the overlay may wait for the app behind it, however slow the
+ * session restore turns out to be. Past this the splash leaves regardless and
+ * the loading screen — which explains itself — takes over.
+ */
+const HARD_CAP_MS = 2_600;
+
+export function AnimatedSplash({
+  onFinish,
+  onFadeStart,
+  ready = true,
+}: {
+  onFinish: () => void;
+  /**
+   * Fired when the overlay starts dissolving, not when it finishes. The status
+   * bar switches to dark ink here: waiting for the end would leave white text
+   * sitting on a background that has already turned to cream.
+   */
+  onFadeStart?: () => void;
+  /**
+   * Whether the screen underneath is worth revealing yet.
+   *
+   * The animation length is a floor, not a schedule. Leaving on a fixed timer
+   * meant that whenever the session restore ran long the splash uncovered a
+   * spinner, and the user watched a considered piece of motion hand over to a
+   * loading state — so the shorter the animation got, the more often it
+   * happened. Waiting costs nothing when the app is already ready, because
+   * then this is false for no time at all.
+   */
+  ready?: boolean;
+}) {
   const { width, height } = useWindowDimensions();
+  const [plan, setPlan] = useState<Plan | null>(null);
+  const [floorDone, setFloorDone] = useState(false);
+  const [capped, setCapped] = useState(false);
+  const leaving = useRef(false);
 
   // The diamond's edges run at 45deg, so it satisfies |x| + |y| <= D/2 and
   // covers a w x h rect once D >= w + h. The margin absorbs the rounded corners.
@@ -52,29 +131,73 @@ export function AnimatedSplash({ onFinish }: { onFinish: () => void }) {
   const overlay = useSharedValue(1);
 
   useEffect(() => {
+    let alive = true;
+    const fallback = new Promise<boolean>((resolve) => {
+      setTimeout(() => resolve(false), DECIDE_TIMEOUT_MS);
+    });
+
+    void Promise.race([playedBefore, fallback]).then((played) => {
+      if (alive) setPlan(played ? QUICK : FULL);
+    });
+
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  // The entrance: fixed length, runs the moment the plan is known.
+  useEffect(() => {
+    if (!plan) return;
+
     scale.value = withDelay(
-      EXPAND_DELAY,
-      withTiming(coverScale, { duration: EXPAND_MS, easing: Easing.out(Easing.cubic) }),
+      plan.expandDelay,
+      withTiming(coverScale, { duration: plan.expandMs, easing: Easing.out(Easing.cubic) }),
     );
-    word.value = withDelay(
-      WORD_DELAY,
-      withTiming(1, { duration: WORD_MS, easing: Easing.out(Easing.quad) }),
+
+    if (plan.showText) {
+      word.value = withDelay(
+        plan.wordDelay,
+        withTiming(1, { duration: plan.wordMs, easing: Easing.out(Easing.quad) }),
+      );
+      tag.value = withDelay(
+        plan.tagDelay,
+        withTiming(1, { duration: plan.tagMs, easing: Easing.out(Easing.quad) }),
+      );
+    }
+
+    const floor = setTimeout(() => setFloorDone(true), plan.hold);
+    const cap = setTimeout(() => setCapped(true), HARD_CAP_MS);
+
+    // Written now rather than on completion: someone who kills the app during
+    // the animation has still seen it, and replaying it would be the wrong
+    // reading of what happened.
+    void AsyncStorage.setItem(KEY, '1').catch(() => {
+      // Storage unavailable. The introduction plays again next launch, which is
+      // a cosmetic cost and not worth surfacing.
+    });
+
+    return () => {
+      clearTimeout(floor);
+      clearTimeout(cap);
+    };
+  }, [plan, coverScale, scale, word, tag]);
+
+  // The exit: waits for both the floor and the app, and gives up at the cap.
+  useEffect(() => {
+    if (!plan || leaving.current) return;
+    if (!capped && !(floorDone && ready)) return;
+
+    leaving.current = true;
+    onFadeStart?.();
+
+    overlay.value = withTiming(
+      0,
+      { duration: plan.fade, easing: Easing.inOut(Easing.quad) },
+      (finished) => {
+        if (finished) runOnJS(onFinish)();
+      },
     );
-    tag.value = withDelay(
-      TAG_DELAY,
-      withTiming(1, { duration: TAG_MS, easing: Easing.out(Easing.quad) }),
-    );
-    overlay.value = withDelay(
-      HOLD_UNTIL,
-      withTiming(
-        0,
-        { duration: FADE_MS, easing: Easing.inOut(Easing.quad) },
-        (finished) => {
-          if (finished) runOnJS(onFinish)();
-        },
-      ),
-    );
-  }, [coverScale, scale, word, tag, overlay, onFinish]);
+  }, [plan, floorDone, ready, capped, overlay, onFinish, onFadeStart]);
 
   // Every worklet below reads only shared values and literal math. Nothing here
   // may call an imported JS helper — worklets run on the UI thread, where those
@@ -102,12 +225,16 @@ export function AnimatedSplash({ onFinish }: { onFinish: () => void }) {
       testID="animated-splash"
     >
       <View style={[StyleSheet.absoluteFill, styles.center]}>
+        {/* The gradient carries the corner radius itself. Rounding the parent
+            and clipping with `overflow: hidden` would force Android to render
+            this subtree offscreen, and it is being scaled past 10x at the exact
+            moment the device is busiest. */}
         <Animated.View style={[styles.diamond, diamondStyle]}>
           <LinearGradient
             colors={theme.color.coralGradient}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
-            style={StyleSheet.absoluteFill}
+            style={[StyleSheet.absoluteFill, styles.gradient]}
           />
         </Animated.View>
       </View>
@@ -128,9 +255,8 @@ const styles = StyleSheet.create({
   diamond: {
     width: SIDE,
     height: SIDE,
-    borderRadius: RADIUS,
-    overflow: 'hidden',
   },
+  gradient: { borderRadius: RADIUS },
   word: {
     color: '#FFFFFF',
     fontSize: 34,
