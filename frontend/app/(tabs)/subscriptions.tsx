@@ -30,6 +30,7 @@ import { parseISO, differenceInCalendarDays, format } from 'date-fns';
 import { theme, CATEGORY_COLORS } from '@/src/theme';
 import { useAuth, monthlyEquivalent } from '@/src/auth-context';
 import { currentRenewal } from '@/src/cycles';
+import { splitByTrial } from '@/src/trials';
 import { toISODate } from '@/src/dates';
 import {
   Badge, BrandAvatar, Button, EmptyState, IconButton, SearchField, Segmented, formatMoney,
@@ -112,14 +113,27 @@ export default function SubscriptionsScreen() {
     return sorted.sort((a, b) => Number(a.status !== 'active') - Number(b.status !== 'active'));
   }, [subs, query, category, sort, primary, rate]);
 
-  /** What the filtered view costs, so filtering itself answers a question. */
-  const shownMonthly = useMemo(
-    () =>
-      filtered
-        .filter((x) => x.status === 'active')
-        .reduce((sum, x) => sum + convertToPrimary(monthlyEquivalent(x), x.currency, primary, rate), 0),
-    [filtered, primary, rate],
-  );
+  /**
+   * What the filtered view costs, so filtering itself answers a question.
+   *
+   * Trials are held out, exactly as Home holds them out of its headline figure.
+   * They were counted here and not there, so the two screens gave different
+   * answers to the same question the moment anything was on trial — and the one
+   * that looked wrong was whichever you happened to read second.
+   *
+   * A trial is still listed as a row; it just does not cost anything yet, and
+   * the subtitle says how many are waiting rather than quietly dropping them.
+   */
+  const { shownMonthly, shownTrials } = useMemo(() => {
+    const { charging, trialing } = splitByTrial(filtered.filter((x) => x.status === 'active'));
+    return {
+      shownMonthly: charging.reduce(
+        (sum, x) => sum + convertToPrimary(monthlyEquivalent(x), x.currency, primary, rate),
+        0,
+      ),
+      shownTrials: trialing.length,
+    };
+  }, [filtered, primary, rate]);
 
   const onRefresh = async () => {
     setRefreshing(true);
@@ -149,7 +163,8 @@ export default function SubscriptionsScreen() {
             <Text style={s.subtitle}>
               {subsLoading
                 ? 'Loading…'
-                : `${filtered.length} ${filtered.length === 1 ? 'item' : 'items'} · ${formatMoney(shownMonthly, primary)}/mo`}
+                : `${filtered.length} ${filtered.length === 1 ? 'item' : 'items'} · ${formatMoney(shownMonthly, primary)}/mo` +
+                  (shownTrials > 0 ? ` · ${shownTrials} on trial` : '')}
             </Text>
           </View>
           <IconButton
