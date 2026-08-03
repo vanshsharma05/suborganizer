@@ -23,10 +23,14 @@ import {
 } from '@/src/ui';
 import { Press, Reveal } from '@/src/motion';
 import { convertToPrimary, useExchangeRate } from '@/src/currency';
-import { daysUntilISO, parseISODate } from '@/src/dates';
+import { currentRenewal } from '@/src/cycles';
+import { daysUntilISO, parseISODate, toISODate } from '@/src/dates';
 import type { Subscription } from '@/src/api';
 
-type Group = { key: string; label: string; items: Subscription[]; total: number };
+/** A subscription paired with where its renewal has actually got to. */
+type Due = { sub: Subscription; renewal: string };
+
+type Group = { key: string; label: string; items: Due[]; total: number };
 
 export default function CalendarScreen() {
   const insets = useSafeAreaInsets();
@@ -38,44 +42,54 @@ export default function CalendarScreen() {
   // In the deps below so totals recompute when the live USD rate arrives.
   const rate = useExchangeRate();
 
-  const timeline = useMemo(
-    () =>
-      subs
-        .filter((x) => x.status === 'active')
-        .slice()
-        .sort((a, b) => a.next_renewal.localeCompare(b.next_renewal)),
-    [subs],
-  );
+  /*
+   * Sorted, grouped and counted on where each renewal has actually got to.
+   *
+   * Reading the stored date put anything stale into a month heading that has
+   * already been and gone — "July 2026" sitting above "August 2026" on a screen
+   * titled Upcoming renewals — and pinned it to the top of the timeline.
+   *
+   * The totals were worse than untidy. `left >= 0` quietly excluded every past
+   * date, so a subscription charging in four days was left out of "Next 7 days"
+   * purely because nobody had opened the app since its last renewal. The figure
+   * was wrong in the direction that matters, and nothing said so.
+   */
+  const timeline = useMemo<Due[]>(() => {
+    const todayISO = toISODate(new Date());
+    return subs
+      .filter((x) => x.status === 'active')
+      .map((sub) => ({
+        sub,
+        renewal: currentRenewal(sub.next_renewal, sub.billing_cycle, todayISO),
+      }))
+      .sort((a, b) => a.renewal.localeCompare(b.renewal));
+  }, [subs]);
 
   const { total7, total30 } = useMemo(() => {
     const dueWithin = (days: number): number =>
       timeline
-        .filter((x) => {
-          const left = daysUntilISO(x.next_renewal);
+        .filter(({ renewal }) => {
+          const left = daysUntilISO(renewal);
           return left !== null && left >= 0 && left <= days;
         })
-        .reduce((acc, x) => acc + convertToPrimary(x.amount, x.currency, primary, rate), 0);
+        .reduce((acc, { sub }) => acc + convertToPrimary(sub.amount, sub.currency, primary, rate), 0);
 
     return { total7: dueWithin(7), total30: dueWithin(30) };
   }, [timeline, primary, rate]);
 
   const groups = useMemo<Group[]>(() => {
     const out: Group[] = [];
-    for (const sub of timeline) {
-      const d = parseISODate(sub.next_renewal);
+    for (const due of timeline) {
+      const d = parseISODate(due.renewal);
       if (!d) continue;
       const key = format(d, 'yyyy-MM');
+      const amount = convertToPrimary(due.sub.amount, due.sub.currency, primary, rate);
       const last = out[out.length - 1];
       if (last?.key === key) {
-        last.items.push(sub);
-        last.total += convertToPrimary(sub.amount, sub.currency, primary, rate);
+        last.items.push(due);
+        last.total += amount;
       } else {
-        out.push({
-          key,
-          label: format(d, 'MMMM yyyy'),
-          items: [sub],
-          total: convertToPrimary(sub.amount, sub.currency, primary, rate),
-        });
+        out.push({ key, label: format(d, 'MMMM yyyy'), items: [due], total: amount });
       }
     }
     return out;
@@ -97,7 +111,13 @@ export default function CalendarScreen() {
           paddingTop: insets.top + 16, paddingBottom: insets.bottom + 32, paddingHorizontal: 20,
         }}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.color.brand} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={theme.color.brand}
+            colors={[theme.color.brand]}
+            progressBackgroundColor={theme.color.raised}
+          />
         }
         showsVerticalScrollIndicator={false}
       >
@@ -124,9 +144,9 @@ export default function CalendarScreen() {
               <Text style={s.monthTotal}>{formatMoneyRounded(g.total, primary)}</Text>
             </View>
 
-            {g.items.map((sub, i) => {
-              const d = parseISODate(sub.next_renewal);
-              const days = daysUntilISO(sub.next_renewal) ?? 0;
+            {g.items.map(({ sub, renewal }, i) => {
+              const d = parseISODate(renewal);
+              const days = daysUntilISO(renewal) ?? 0;
               const soon = days >= 0 && days <= 7;
               if (!d) return null;
 
