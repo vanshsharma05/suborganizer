@@ -1,5 +1,5 @@
-import { advanceRenewal } from './cycles';
-import { addDaysISO, daysUntilISO } from './dates';
+import { advanceRenewal, currentRenewal } from './cycles';
+import { addDaysISO, daysUntilISO, toISODate } from './dates';
 import { supabase } from './supabase';
 
 // Re-exported because callers reach for it alongside the queries here, but it
@@ -214,7 +214,13 @@ export async function keepSubscription(sub: Subscription): Promise<Subscription>
   const { data, error } = await supabase
     .from('subscriptions')
     .update({
-      next_renewal: advanceRenewal(sub.next_renewal, sub.billing_cycle),
+      // Rolled to the present before being advanced. Advancing the stored date
+      // alone moved a three-month-stale subscription to two months stale, so
+      // the reminder came straight back and "Keep it" looked like a dead button.
+      next_renewal: advanceRenewal(
+        currentRenewal(sub.next_renewal, sub.billing_cycle, toISODate(new Date())),
+        sub.billing_cycle,
+      ),
       snoozed_until: null,
     })
     .eq('id', sub.id)
@@ -262,6 +268,7 @@ export async function dismissPriceChange(id: string): Promise<void> {
  */
 export function deriveReminders(subs: Subscription[], today: Date = new Date()): ReminderItem[] {
   const items: ReminderItem[] = [];
+  const todayISO = toISODate(today);
 
   for (const s of subs) {
     if (s.status !== 'active') continue;
@@ -270,7 +277,19 @@ export function deriveReminders(subs: Subscription[], today: Date = new Date()):
     const snoozeIn = daysUntilISO(s.snoozed_until, today);
     if (snoozeIn !== null && snoozeIn > 0) continue;
 
-    const daysLeft = daysUntilISO(s.next_renewal, today);
+    /*
+     * Where the renewal has actually got to, not where it was last written.
+     *
+     * A stored date drifts into the past for anyone who does not open the app
+     * every month, and a date in the past is inside every reminder window
+     * forever. That is what pinned a badge to the Home tab that no amount of
+     * reviewing would clear.
+     *
+     * `next_renewal` is replaced on the item too, so every screen reading this
+     * list agrees with the day count beside it.
+     */
+    const renewal = currentRenewal(s.next_renewal, s.billing_cycle, todayISO);
+    const daysLeft = daysUntilISO(renewal, today);
     if (daysLeft === null) continue;
 
     const window = s.reminder_days_before ?? 3;
@@ -278,7 +297,10 @@ export function deriveReminders(subs: Subscription[], today: Date = new Date()):
 
     items.push({
       ...s,
+      next_renewal: renewal,
       days_left: daysLeft,
+      // `overdue` is unreachable while currentRenewal is doing its job, and is
+      // kept as the honest answer for a date it could not parse.
       urgency:
         daysLeft < 0 ? 'overdue' : daysLeft === 0 ? 'today' : daysLeft <= 2 ? 'soon' : 'upcoming',
     });

@@ -33,6 +33,8 @@ import {
 } from '@/src/ui';
 import { CountUp, Meter, Press, Reveal, Skeleton, useCollapsingHeader } from '@/src/motion';
 import { convertToPrimary, symbolFor, useExchangeRate } from '@/src/currency';
+import { currentRenewal } from '@/src/cycles';
+import { toISODate } from '@/src/dates';
 import { dismissPriceChange } from '@/src/api';
 import { activeTrials, splitByTrial, trialDaysLeft, trialLabel } from '@/src/trials';
 import { findPriceRises } from '@/src/price-watch';
@@ -228,14 +230,19 @@ export default function Dashboard() {
    */
   const remindingIds = useMemo(() => new Set(reminders.map((r) => r.id)), [reminders]);
 
-  const upcoming = useMemo(
-    () =>
-      charging
-        .filter((s) => !remindingIds.has(s.id))
-        .sort((a, b) => parseISO(a.next_renewal).getTime() - parseISO(b.next_renewal).getTime())
-        .slice(0, 8),
-    [charging, remindingIds],
-  );
+  const upcoming = useMemo(() => {
+    const todayISO = toISODate(new Date());
+    return charging
+      .filter((s) => !remindingIds.has(s.id))
+      // Carries the rolled-forward date, so the strip and the list agree and a
+      // renewal left in the past cannot hold the front of the queue forever.
+      .map((s) => ({
+        sub: s,
+        renewal: currentRenewal(s.next_renewal, s.billing_cycle, todayISO),
+      }))
+      .sort((a, b) => a.renewal.localeCompare(b.renewal))
+      .slice(0, 8);
+  }, [charging, remindingIds]);
 
   const trials = useMemo(() => activeTrials(allActive), [allActive]);
   const rises = useMemo(() => findPriceRises(priceChanges, subs), [priceChanges, subs]);
@@ -576,8 +583,8 @@ export default function Dashboard() {
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={{ paddingHorizontal: 20, gap: 12, paddingVertical: 4 }}
           >
-            {upcoming.map((sub, i) => {
-              const days = differenceInCalendarDays(parseISO(sub.next_renewal), new Date());
+            {upcoming.map(({ sub, renewal }, i) => {
+              const days = differenceInCalendarDays(parseISO(renewal), new Date());
               return (
                 <Reveal key={sub.id} index={i} delay={220}>
                   <Press

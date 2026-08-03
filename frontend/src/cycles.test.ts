@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { advanceRenewal, CYCLE_DAYS, monthlyEquivalent } from './cycles';
+import { advanceRenewal, currentRenewal, CYCLE_DAYS, monthlyEquivalent } from './cycles';
 
 describe('monthlyEquivalent', () => {
   it('leaves a monthly amount alone', () => {
@@ -88,5 +88,92 @@ describe('advanceRenewal', () => {
       iso = next;
     }
     expect(iso).toBe('2028-01-28');
+  });
+});
+
+describe('currentRenewal', () => {
+  it('leaves a future date alone', () => {
+    expect(currentRenewal('2026-09-15', 'monthly', '2026-08-03')).toBe('2026-09-15');
+  });
+
+  it('leaves today alone — it renews today, not next month', () => {
+    expect(currentRenewal('2026-08-03', 'monthly', '2026-08-03')).toBe('2026-08-03');
+  });
+
+  it('rolls a one-cycle-stale monthly date forward', () => {
+    expect(currentRenewal('2026-07-15', 'monthly', '2026-08-03')).toBe('2026-08-15');
+  });
+
+  /**
+   * The case that made "Keep it" look broken. A single advance left this two
+   * months behind, so the reminder returned the moment the list refreshed.
+   */
+  it('rolls a three-month-stale date all the way to the future', () => {
+    expect(currentRenewal('2026-05-10', 'monthly', '2026-08-03')).toBe('2026-08-10');
+  });
+
+  it('rolls weekly dates', () => {
+    expect(currentRenewal('2026-07-01', 'weekly', '2026-08-03')).toBe('2026-08-05');
+  });
+
+  it('rolls yearly dates', () => {
+    expect(currentRenewal('2023-11-20', 'yearly', '2026-08-03')).toBe('2026-11-20');
+  });
+
+  /**
+   * The reason this counts from the anchor rather than stepping. Repeatedly
+   * applying advanceRenewal gives 31 Jan -> 28 Feb -> 28 Mar -> 28 Apr, and the
+   * 31st is lost for good the first time a February is crossed.
+   */
+  it('does not lose the day of the month when it crosses a short one', () => {
+    expect(currentRenewal('2026-01-31', 'monthly', '2026-04-01')).toBe('2026-04-30');
+    expect(currentRenewal('2026-01-31', 'monthly', '2026-03-01')).toBe('2026-03-31');
+    expect(currentRenewal('2026-01-31', 'monthly', '2026-05-31')).toBe('2026-05-31');
+  });
+
+  it('still clamps into the month it actually lands on', () => {
+    // February is the target month, so the 31st has nowhere else to go.
+    expect(currentRenewal('2026-01-31', 'monthly', '2026-02-10')).toBe('2026-02-28');
+  });
+
+  it('holds the anchor across a leap year', () => {
+    expect(currentRenewal('2024-01-31', 'monthly', '2024-02-05')).toBe('2024-02-29');
+    expect(currentRenewal('2024-01-31', 'monthly', '2024-03-05')).toBe('2024-03-31');
+  });
+
+  it('holds a 29 February anchor on a yearly cycle', () => {
+    expect(currentRenewal('2024-02-29', 'yearly', '2025-01-01')).toBe('2025-02-28');
+    expect(currentRenewal('2024-02-29', 'yearly', '2028-01-01')).toBe('2028-02-29');
+  });
+
+  it('survives years of neglect without giving up', () => {
+    // 8 March 2016 was a Tuesday, so every step lands on a Tuesday.
+    expect(currentRenewal('2016-03-08', 'weekly', '2026-08-03')).toBe('2026-08-04');
+  });
+
+  /**
+   * A corrupt date must terminate rather than spin. advanceRenewal returns its
+   * input unchanged when it cannot parse it, which without a guard is an
+   * infinite loop on the launch path.
+   */
+  it('gives up on an unparseable date instead of looping forever', () => {
+    expect(currentRenewal('not-a-date', 'monthly', '2026-08-03')).toBe('not-a-date');
+    expect(currentRenewal('', 'monthly', '2026-08-03')).toBe('');
+  });
+
+  it('treats an unknown cycle as monthly, as advanceRenewal does', () => {
+    expect(currentRenewal('2026-06-10', 'fortnightly', '2026-08-03')).toBe('2026-08-10');
+  });
+
+  it('never returns a date before today for a valid input', () => {
+    const cases: [string, string][] = [
+      ['2020-01-01', 'weekly'],
+      ['2021-06-30', 'monthly'],
+      ['2019-12-31', 'yearly'],
+      ['2026-01-31', 'monthly'],
+    ];
+    for (const [start, cycle] of cases) {
+      expect(currentRenewal(start, cycle, '2026-08-03') >= '2026-08-03').toBe(true);
+    }
   });
 });

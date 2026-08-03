@@ -69,6 +69,77 @@ export function advanceRenewal(nextRenewalISO: string, cycle: string): string {
   return utcDateString(ny, nm - 1, Math.min(d, lastDay));
 }
 
+/**
+ * Where a renewal date has actually got to by `todayISO`.
+ *
+ * `advanceRenewal` moves exactly one cycle, which is right when something has
+ * just renewed and wrong for everything else. A subscription nobody has opened
+ * for three months has a stored date three months behind, and one step forward
+ * leaves it two months behind — so "Keep it" appeared to do nothing, the row
+ * kept its reminder, and the tab badge never cleared.
+ *
+ * Rolling forward gives the answer to the question actually being asked. A date
+ * in the past is never the next renewal.
+ *
+ * Takes today as a string rather than a Date so this file stays free of
+ * timezone handling and of dependencies — see the note above `advanceRenewal`.
+ */
+export function currentRenewal(nextRenewalISO: string, cycle: string, todayISO: string): string {
+  // ISO days compare correctly as plain strings, which avoids constructing
+  // dates only to throw them away.
+  if (nextRenewalISO >= todayISO) return nextRenewalISO;
+
+  const [y, m, d] = nextRenewalISO.split('-').map(Number);
+  if (!y || !m || !d) return nextRenewalISO;
+
+  /*
+   * Counted from the stored date, not stepped from it.
+   *
+   * Repeatedly applying `advanceRenewal` drifts. Its month-end clamp is correct
+   * for one step and lossy across several: 31 January becomes 28 February, and
+   * the next step starts from the 28th, so the 31st is gone for good. A
+   * subscription billed on the last day of the month would quietly slide to the
+   * 28th the first time it crossed a February. Anchoring every candidate to the
+   * original day and clamping only for the month being landed on keeps 31 → 28
+   * Feb → 31 Mar → 30 Apr, which is what the merchant actually does.
+   *
+   * The bound is a guarantee of termination, not a real limit: 4000 weeks is
+   * seventy-six years.
+   */
+  if (cycle === 'weekly') {
+    for (let k = 1; k < 4000; k += 1) {
+      const at = utcDateString(y, m - 1, d + k * 7);
+      if (at >= todayISO) return at;
+    }
+    return nextRenewalISO;
+  }
+
+  if (cycle === 'yearly') {
+    for (let k = 1; k < 200; k += 1) {
+      const at = clampedDay(y + k, m - 1, d);
+      if (at >= todayISO) return at;
+    }
+    return nextRenewalISO;
+  }
+
+  // monthly, and anything unrecognised — matching advanceRenewal's default
+  for (let k = 1; k < 2400; k += 1) {
+    const at = clampedDay(y, m - 1 + k, d);
+    if (at >= todayISO) return at;
+  }
+  return nextRenewalISO;
+}
+
+/**
+ * `day` of the given month, pulled back to the last day when the month is
+ * shorter. `monthIndex` may overflow either way; Date.UTC normalises it.
+ */
+function clampedDay(year: number, monthIndex: number, day: number): string {
+  // Day 0 of the following month is the last day of this one.
+  const lastDay = new Date(Date.UTC(year, monthIndex + 1, 0)).getUTCDate();
+  return utcDateString(year, monthIndex, Math.min(day, lastDay));
+}
+
 function utcDateString(year: number, monthIndex: number, day: number): string {
   return new Date(Date.UTC(year, monthIndex, day)).toISOString().slice(0, 10);
 }

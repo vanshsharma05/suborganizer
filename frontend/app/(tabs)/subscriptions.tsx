@@ -29,6 +29,8 @@ import { parseISO, differenceInCalendarDays, format } from 'date-fns';
 
 import { theme, CATEGORY_COLORS } from '@/src/theme';
 import { useAuth, monthlyEquivalent } from '@/src/auth-context';
+import { currentRenewal } from '@/src/cycles';
+import { toISODate } from '@/src/dates';
 import {
   Badge, BrandAvatar, Button, EmptyState, IconButton, SearchField, Segmented, formatMoney,
 } from '@/src/ui';
@@ -92,7 +94,15 @@ export default function SubscriptionsScreen() {
           convertToPrimary(monthlyEquivalent(a), a.currency, primary, rate),
       );
     } else if (sort === 'soon') {
-      sorted.sort((a, b) => parseISO(a.next_renewal).getTime() - parseISO(b.next_renewal).getTime());
+      // Sorted on the same rolled-forward date the rows display, or a stale
+      // entry would claim the top of "Due soon" indefinitely.
+      const todayISO = toISODate(new Date());
+      sorted.sort(
+        (a, b) =>
+          currentRenewal(a.next_renewal, a.billing_cycle, todayISO).localeCompare(
+            currentRenewal(b.next_renewal, b.billing_cycle, todayISO),
+          ),
+      );
     } else {
       sorted.sort((a, b) => a.name.localeCompare(b.name));
     }
@@ -209,7 +219,13 @@ export default function SubscriptionsScreen() {
         }}
         ItemSeparatorComponent={separator}
         refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.color.brand} />
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={theme.color.brand}
+            colors={[theme.color.brand]}
+            progressBackgroundColor={theme.color.raised}
+          />
         }
         // Tuned down from the defaults, which render ten rows up front and keep
         // twenty-one screens of them alive. Each row carries an avatar that
@@ -342,7 +358,17 @@ const Row = React.memo(function Row({
   rate: number;
   onPress: (id: string) => void;
 }) {
-  const days = differenceInCalendarDays(parseISO(sub.next_renewal), new Date());
+  /*
+   * The renewal as it stands today, not as it was last written.
+   *
+   * A stored date that has slipped into the past made the row read as normal
+   * while showing a day that has already gone: `days` was negative, so the
+   * "renews soon" badge — which only fires on 0..7 — never appeared, and the
+   * date beneath the name was simply wrong. The row that most needed attention
+   * was the one that drew none.
+   */
+  const renewal = currentRenewal(sub.next_renewal, sub.billing_cycle, toISODate(new Date()));
+  const days = differenceInCalendarDays(parseISO(renewal), new Date());
   const paused = sub.status !== 'active';
   const monthly = monthlyEquivalent(sub);
   const soon = !paused && days >= 0 && days <= 7;
@@ -363,7 +389,7 @@ const Row = React.memo(function Row({
             {paused && <Badge label="Paused" tone="neutral" />}
           </View>
           <Text style={s.meta} numberOfLines={1}>
-            {sub.category} · {format(parseISO(sub.next_renewal), 'd MMM')}
+            {sub.category} · {format(parseISO(renewal), 'd MMM')}
           </Text>
           {soon && (
             <Badge
