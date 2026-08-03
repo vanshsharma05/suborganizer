@@ -30,6 +30,7 @@ import Animated, {
 import { useAuth } from '@/src/auth-context';
 import { theme } from '@/src/theme';
 import { Press } from '@/src/motion';
+import { Segmented } from '@/src/ui';
 import { looksLikeEmail } from '@/src/validate';
 
 const SELLING_POINTS: { icon: keyof typeof Ionicons.glyphMap; text: string }[] = [
@@ -94,13 +95,37 @@ export default function AuthScreen() {
 
   const emailRef = useRef<TextInput>(null);
   const passwordRef = useRef<TextInput>(null);
+  const scrollRef = useRef<ScrollView>(null);
+
+  /**
+   * Brings the field you just tapped above the keyboard.
+   *
+   * Android resizes the window rather than overlaying, so the form — which is
+   * the last thing in the scroll view — ends up below the fold, and nothing
+   * scrolls it back. You could see the keyboard and not the box you were
+   * typing into.
+   *
+   * `scrollToEnd` is exact here rather than approximate: the inputs and their
+   * buttons *are* the end of the content. The delay lets the resize land first,
+   * otherwise it scrolls to where the bottom used to be.
+   */
+  const revealForm = () => {
+    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 120);
+  };
 
   /**
    * "subscription." is the longest word on the screen and it sits on its own
    * line by design. At a fixed 46px it runs past the edge on a 320dp phone,
    * which turns a three-line headline into four and breaks the shape.
    */
-  const heroSize = Math.min(46, Math.round((width - 30) / 7.02));
+  const fullHero = Math.min(46, Math.round((width - 30) / 7.02));
+
+  /*
+   * The headline is the pitch, and the pitch is over once someone has asked for
+   * the form. Shrinking it there hands roughly 120pt of vertical space to the
+   * thing being typed into, before the keyboard has even opened.
+   */
+  const heroSize = showEmail ? Math.round(fullHero * 0.58) : fullHero;
 
   useEffect(() => {
     if (user) router.replace('/');
@@ -199,9 +224,10 @@ export default function AuthScreen() {
         style={{ flex: 1 }}
       >
         <ScrollView
+          ref={scrollRef}
           contentContainerStyle={[
             s.scroll,
-            { paddingTop: insets.top + 64, paddingBottom: insets.bottom + 24 },
+            { paddingTop: insets.top + (showEmail ? 28 : 64), paddingBottom: insets.bottom + 24 },
           ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
@@ -295,25 +321,19 @@ export default function AuthScreen() {
               exiting={SlideOutDown.duration(240)}
               style={{ gap: 11 }}
             >
-              <View style={s.segment}>
-                {(['login', 'signup'] as const).map((m) => (
-                  <Press
-                    key={m}
-                    onPress={() => {
-                      setMode(m);
-                      setErr(null);
-                    }}
-                    style={{ flex: 1 }}
-                    testID={`auth-tab-${m}`}
-                  >
-                    <View style={[s.segItem, mode === m && s.segActive]}>
-                      <Text style={[s.segText, mode === m && s.segTextActive]}>
-                        {m === 'login' ? 'Sign in' : 'Create account'}
-                      </Text>
-                    </View>
-                  </Press>
-                ))}
-              </View>
+              <Segmented<'login' | 'signup'>
+                options={[
+                  { value: 'login', label: 'Sign in' },
+                  { value: 'signup', label: 'Create account' },
+                ]}
+                value={mode}
+                onChange={(m) => {
+                  setMode(m);
+                  setErr(null);
+                }}
+                tone="onBrand"
+                testID="auth-tab"
+              />
 
               {mode === 'signup' && (
                 <TextInput
@@ -327,7 +347,10 @@ export default function AuthScreen() {
                   returnKeyType="next"
                   onSubmitEditing={() => emailRef.current?.focus()}
                   submitBehavior="submit"
-                  onFocus={() => setFocus('name')}
+                  onFocus={() => {
+                    setFocus('name');
+                    revealForm();
+                  }}
                   onBlur={() => setFocus(null)}
                   testID="auth-name-input"
                 />
@@ -345,7 +368,10 @@ export default function AuthScreen() {
                 returnKeyType="next"
                 onSubmitEditing={() => passwordRef.current?.focus()}
                 submitBehavior="submit"
-                onFocus={() => setFocus('email')}
+                onFocus={() => {
+                  setFocus('email');
+                  revealForm();
+                }}
                 onBlur={() => setFocus(null)}
                 style={[s.input, focus === 'email' && s.inputFocused]}
                 testID="auth-email-input"
@@ -365,7 +391,10 @@ export default function AuthScreen() {
                   autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
                   returnKeyType="go"
                   onSubmitEditing={submit}
-                  onFocus={() => setFocus('password')}
+                  onFocus={() => {
+                    setFocus('password');
+                    revealForm();
+                  }}
                   onBlur={() => setFocus(null)}
                   style={[s.input, s.inputWithButton, focus === 'password' && s.inputFocused]}
                   testID="auth-password-input"
@@ -477,18 +506,6 @@ const s = StyleSheet.create({
     color: 'rgba(255,255,255,0.68)', fontSize: 11.5, lineHeight: 17,
     textAlign: 'center', paddingHorizontal: 6,
   },
-
-  segment: {
-    flexDirection: 'row', backgroundColor: 'rgba(0,0,0,0.2)',
-    borderRadius: theme.radius.pill, padding: 4, marginBottom: 4,
-  },
-  segItem: {
-    height: 40, borderRadius: theme.radius.pill,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  segActive: { backgroundColor: 'rgba(255,255,255,0.96)' },
-  segText: { color: 'rgba(255,255,255,0.82)', fontWeight: '700', fontSize: 13 },
-  segTextActive: { color: theme.color.brandDeep },
 
   input: {
     height: 54, borderRadius: theme.radius.md,

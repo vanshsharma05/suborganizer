@@ -10,7 +10,7 @@
  * touch feedback and haptics are uniform and cannot be forgotten.
  */
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator, StyleSheet, Text, TextInput, View,
   type StyleProp, type ViewStyle,
@@ -18,7 +18,9 @@ import {
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import Animated, { FadeIn } from 'react-native-reanimated';
+import Animated, {
+  FadeIn, useAnimatedStyle, useSharedValue, withSpring,
+} from 'react-native-reanimated';
 import { theme } from './theme';
 import { Press } from './motion';
 import type { Subscription } from './api';
@@ -495,47 +497,163 @@ const field = StyleSheet.create({
 });
 
 /** Two-to-four exclusive options. Wider than that, use Chips. */
+/**
+ * A choice between two and four things, with one indicator that travels.
+ *
+ * The version this replaced gave every option its own background and switched
+ * it instantly, so choosing felt like a checkbox rather than a control — and
+ * pressing scaled the individual segment down, which made a fixed track look
+ * like it was made of loose buttons. A single pill that springs to where you
+ * tapped is what tells you the options are one thing with one answer.
+ *
+ * Label colour crossfades on the same spring, so the text is never dark ink on
+ * a dark pill part-way through the journey.
+ */
 export function Segmented<T extends string>({
-  options, value, onChange, testID,
+  options, value, onChange, tone = 'paper', testID,
 }: {
   options: { value: T; label: string }[];
   value: T;
   onChange: (v: T) => void;
+  /**
+   * `onBrand` is the same control sitting on the coral gradient, where a paper
+   * track disappears and dark ink is unreadable. Sign-in used to hand-roll its
+   * own version for this reason, which is how it ended up the only segmented
+   * control in the app that never animated.
+   */
+  tone?: 'paper' | 'onBrand';
   testID?: string;
 }) {
+  const [rowWidth, setRowWidth] = useState(0);
+  const index = Math.max(0, options.findIndex((o) => o.value === value));
+  const slot = rowWidth > 0 ? rowWidth / options.length : 0;
+
+  const x = useSharedValue(0);
+  const placed = useRef(false);
+
+  useEffect(() => {
+    if (slot === 0) return;
+    const target = index * slot;
+    // The first placement is a fact, not a transition — otherwise the pill
+    // slides in from the left every time the screen mounts.
+    if (!placed.current) {
+      placed.current = true;
+      x.value = target;
+      return;
+    }
+    x.value = withSpring(target, theme.motion.enter);
+  }, [index, slot, x]);
+
+  const pill = useAnimatedStyle(() => ({ transform: [{ translateX: x.value }] }));
+
+  const dark = tone === 'onBrand';
+
   return (
-    <View style={seg.track} testID={testID}>
-      {options.map((o) => {
-        const active = o.value === value;
-        return (
-          <Press
+    <View style={[seg.track, dark && seg.trackOnBrand]} testID={testID}>
+      <View style={seg.row} onLayout={(e) => setRowWidth(e.nativeEvent.layout.width)}>
+        {slot > 0 && (
+          <Animated.View
+            style={[
+              seg.pill,
+              dark && seg.pillOnBrand,
+              { width: slot - SEG_INSET * 2, left: SEG_INSET },
+              pill,
+            ]}
+            pointerEvents="none"
+          />
+        )}
+
+        {options.map((o) => (
+          <SegItem
             key={o.value}
+            label={o.label}
+            active={o.value === value}
+            dark={dark}
             onPress={() => onChange(o.value)}
-            scale={0.96}
-            style={{ flex: 1 }}
             testID={`${testID ?? 'seg'}-${o.value}`}
-          >
-            <View style={[seg.item, active && seg.itemActive]}>
-              <Text style={[seg.label, active && seg.labelActive]} numberOfLines={1}>
-                {o.label}
-              </Text>
-            </View>
-          </Press>
-        );
-      })}
+          />
+        ))}
+      </View>
     </View>
   );
 }
 
+function SegItem({
+  label, active, dark, onPress, testID,
+}: {
+  label: string; active: boolean; dark: boolean; onPress: () => void; testID: string;
+}) {
+  const on = useSharedValue(active ? 1 : 0);
+
+  useEffect(() => {
+    on.value = withSpring(active ? 1 : 0, theme.motion.enter);
+  }, [active, on]);
+
+  // Two labels crossfading rather than one changing colour, for the same reason
+  // the tab bar stacks two icons: the pill is elsewhere for part of the trip.
+  const off = useAnimatedStyle(() => ({ opacity: 1 - on.value }));
+  const lit = useAnimatedStyle(() => ({ opacity: on.value }));
+
+  return (
+    <Press
+      onPress={onPress}
+      scale={1}
+      haptic="selection"
+      style={seg.item}
+      accessibilityLabel={label}
+      testID={testID}
+    >
+      <View style={seg.itemInner}>
+        <Animated.Text
+          style={[seg.label, dark && seg.labelOnBrand, off]}
+          numberOfLines={1}
+        >
+          {label}
+        </Animated.Text>
+        <Animated.Text
+          style={[
+            seg.label, seg.labelActive, dark && seg.labelActiveOnBrand, seg.labelOverlay, lit,
+          ]}
+          numberOfLines={1}
+        >
+          {label}
+        </Animated.Text>
+      </View>
+    </Press>
+  );
+}
+
+/** Breathing room between the travelling pill and the edge of its slot. */
+const SEG_INSET = 3;
+
 const seg = StyleSheet.create({
   track: {
-    flexDirection: 'row', gap: 4, padding: 4,
-    backgroundColor: theme.color.surfaceSecondary, borderRadius: theme.radius.pill,
+    padding: 4,
+    backgroundColor: theme.color.surfaceSecondary,
+    borderRadius: theme.radius.pill,
   },
-  item: { height: 40, borderRadius: theme.radius.pill, alignItems: 'center', justifyContent: 'center' },
-  itemActive: { backgroundColor: theme.color.raised, ...theme.shadow.sm },
-  label: { color: theme.color.inkSoft, fontSize: 13, fontWeight: '700' },
-  labelActive: { color: theme.color.ink },
+  trackOnBrand: { backgroundColor: 'rgba(0,0,0,0.22)' },
+  row: { flexDirection: 'row' },
+  pill: {
+    position: 'absolute', top: 0, height: 40,
+    borderRadius: theme.radius.pill,
+    backgroundColor: theme.color.raised,
+    ...theme.shadow.sm,
+  },
+  item: { flex: 1 },
+  itemInner: { height: 40, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 },
+  label: {
+    color: theme.color.inkSoft, fontSize: 13, fontWeight: '700',
+    letterSpacing: -0.1, textAlign: 'center',
+  },
+  pillOnBrand: { backgroundColor: '#FFFFFF' },
+  labelOnBrand: { color: 'rgba(255,255,255,0.82)' },
+  labelActive: { color: theme.color.ink, fontWeight: '800' },
+  // Only on the gradient, where the pill is pure white and coral is the
+  // legible contrast. On paper the active label stays ink, so a segmented
+  // control never spends the screen's one accent on itself.
+  labelActiveOnBrand: { color: theme.color.brandDeep },
+  labelOverlay: { position: 'absolute', left: 6, right: 6 },
 });
 
 // ------------------------------------------------------------------ layout --

@@ -170,18 +170,56 @@ export default function SubscriptionsScreen() {
               testID="subs-search"
             />
           </View>
-          {/* One button for all category filtering, and only when there is more
-              than one category to pick between. */}
+          {/* One control for all category filtering, and only when there is more
+              than one category to pick between.
+
+              The active category used to appear as its own row underneath the
+              sort control, so choosing one added a fourth line of chrome above
+              the list and pushed every subscription down. It lives in the button
+              now: the label reopens the picker, the cross clears it. */}
           {categories.length > 1 && (
-            <Press onPress={() => setPicking(true)} scale={0.92} testID="subs-filter">
-              <View style={[s.filterBtn, category !== 'All' && s.filterBtnOn]}>
-                <Ionicons
-                  name="funnel"
-                  size={17}
-                  color={category !== 'All' ? '#FFFFFF' : theme.color.ink}
-                />
+            category === 'All' ? (
+              <Press
+                onPress={() => setPicking(true)}
+                scale={0.92}
+                accessibilityLabel="Filter by category"
+                testID="subs-filter"
+              >
+                <View style={s.filterBtn}>
+                  <Ionicons name="funnel" size={17} color={theme.color.ink} />
+                </View>
+              </Press>
+            ) : (
+              <View style={s.filterOn}>
+                <Press
+                  onPress={() => setPicking(true)}
+                  scale={0.96}
+                  accessibilityLabel={`Filtering by ${category}. Change category`}
+                  testID="subs-filter"
+                >
+                  <View style={s.filterOnLabel}>
+                    <View
+                      style={[
+                        s.filterDot,
+                        { backgroundColor: CATEGORY_COLORS[category] ?? theme.color.brand },
+                      ]}
+                    />
+                    <Text style={s.filterOnText} numberOfLines={1}>{category}</Text>
+                  </View>
+                </Press>
+                <Press
+                  onPress={() => setCategory('All')}
+                  scale={0.88}
+                  hitSlop={6}
+                  accessibilityLabel="Clear the category filter"
+                  testID="subs-clear-filter"
+                >
+                  <View style={s.filterClear}>
+                    <Ionicons name="close" size={14} color={theme.color.inkSoft} />
+                  </View>
+                </Press>
               </View>
-            </Press>
+            )
           )}
         </View>
 
@@ -197,18 +235,6 @@ export default function SubscriptionsScreen() {
             testID="subs-sort"
           />
         </View>
-
-        {category !== 'All' && (
-          <Press onPress={() => setCategory('All')} scale={0.96} testID="subs-clear-filter">
-            <View style={s.activeFilter}>
-              <View
-                style={[s.filterDot, { backgroundColor: CATEGORY_COLORS[category] ?? theme.color.brand }]}
-              />
-              <Text style={s.activeFilterText}>{category}</Text>
-              <Ionicons name="close-circle" size={15} color={theme.color.inkMuted} />
-            </View>
-          </Press>
-        )}
       </View>
 
       <FlatList
@@ -433,13 +459,23 @@ const s = StyleSheet.create({
   },
   filterBtnOn: { backgroundColor: theme.color.brandPrimary },
 
-  activeFilter: {
-    alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 7,
-    marginTop: 10, paddingHorizontal: 12, paddingVertical: 7,
-    borderRadius: theme.radius.pill, backgroundColor: theme.color.surfaceSecondary,
+  // The filtered state of the same control: still 48 tall so the row does not
+  // change height, but wide enough to name the category it is filtering by.
+  filterOn: {
+    flexDirection: 'row', alignItems: 'center', height: 48, maxWidth: 190,
+    paddingLeft: 14, paddingRight: 6, borderRadius: 24,
+    backgroundColor: theme.color.inverse,
+  },
+  filterOnLabel: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingRight: 8 },
+  filterOnText: {
+    ...theme.type.small, color: theme.color.onInverse, fontWeight: '800', flexShrink: 1,
+  },
+  filterClear: {
+    width: 32, height: 32, borderRadius: 16,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: 'rgba(252,250,247,0.14)',
   },
   filterDot: { width: 8, height: 8, borderRadius: 4 },
-  activeFilterText: { ...theme.type.caption, color: theme.color.ink, fontWeight: '700' },
 
   row: {
     flexDirection: 'row', alignItems: 'center', gap: 13,
