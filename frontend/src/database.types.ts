@@ -34,6 +34,13 @@ type SubscriptionRow = {
   snoozed_until: string | null;
   is_trial: boolean;
   trial_ends: string | null;
+  /**
+   * The day of the month the merchant bills on. Nullable because the column was
+   * added after the first release and the migration is run by hand — the client
+   * falls back to the day in `next_renewal` when it is absent. See
+   * supabase/schema.sql.
+   */
+  anchor_day: number | null;
   created_at: string;
 };
 
@@ -75,6 +82,8 @@ export type Database = {
           snoozed_until?: string | null;
           is_trial?: boolean;
           trial_ends?: string | null;
+          /** Optional: absent on databases where the migration has not run. */
+          anchor_day?: number | null;
           created_at?: string;
         };
         Row: SubscriptionRow;

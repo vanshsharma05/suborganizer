@@ -1,5 +1,5 @@
 import { greetingName } from './apple';
-import { advanceRenewal, currentRenewal } from './cycles';
+import { advanceRenewal, anchorDayOf, currentRenewal } from './cycles';
 import { addDaysISO, daysUntilISO, toISODate } from './dates';
 import { describeError, supabase } from './supabase';
 
@@ -24,6 +24,16 @@ export type Subscription = {
   /** Started as a free trial. Whether it still *is* one comes from src/trials.ts. */
   is_trial?: boolean;
   trial_ends?: string | null;
+  /**
+   * The day of the month the merchant bills on, when it is known.
+   *
+   * Not derivable from `next_renewal`: a subscription billed on the 31st is
+   * stored as 28 February for one month a year, and stepping from that date
+   * loses the 31st permanently. Absent on rows written before the column
+   * existed, and on any database where the migration has not been run — every
+   * caller falls back to the day in `next_renewal`, which is the old behaviour.
+   */
+  anchor_day?: number | null;
   created_at?: string;
 };
 
@@ -174,27 +184,62 @@ export async function createSubscription(input: SubscriptionInput): Promise<Subs
 
   // user_id must be set explicitly — the INSERT policy checks it matches
   // auth.uid(), and the column has no default.
-  const { data, error } = await supabase
-    .from('subscriptions')
-    .insert({ ...input, user_id })
-    .select('*')
-    .single();
-  if (error) throw new Error(error.message);
-  return toSub(data);
+  // The date they picked is the billing day, by definition.
+  const anchor = input.anchor_day ?? anchorDayOf(input.next_renewal);
+
+  const attempt = (anchor_day: number | null | undefined) =>
+    supabase
+      .from('subscriptions')
+      .insert({ ...input, anchor_day, user_id })
+      .select('*')
+      .single();
+
+  let res = await attempt(anchor);
+  // `undefined` is dropped by JSON.stringify, so the retry sends no such key at
+  // all rather than sending null into a column that is not there.
+  if (missingColumn(res.error, 'anchor_day')) res = await attempt(undefined);
+
+  if (res.error) throw new Error(res.error.message);
+  return toSub(res.data);
 }
 
 export async function updateSubscription(
   id: string,
   input: SubscriptionInput,
 ): Promise<Subscription> {
-  const { data, error } = await supabase
-    .from('subscriptions')
-    .update(input)
-    .eq('id', id)
-    .select('*')
-    .single();
-  if (error) throw new Error(error.message);
-  return toSub(data);
+  const attempt = (anchor_day: number | null | undefined) =>
+    supabase
+      .from('subscriptions')
+      .update({ ...input, anchor_day })
+      .eq('id', id)
+      .select('*')
+      .single();
+
+  let res = await attempt(input.anchor_day);
+  if (missingColumn(res.error, 'anchor_day')) res = await attempt(undefined);
+
+  if (res.error) throw new Error(res.error.message);
+  return toSub(res.data);
+}
+
+/**
+ * Whether the database is telling us a column simply is not there.
+ *
+ * `anchor_day` arrived after the first release, and the migration is something a
+ * person has to remember to run. If the app assumed it existed, the first thing
+ * anyone did on an un-migrated database — add a subscription — would fail
+ * outright, which is a far worse failure than the drift the column fixes.
+ */
+function missingColumn(
+  error: { code?: string; message?: string } | null,
+  column: string,
+): boolean {
+  if (!error) return false;
+  // 42703 is Postgres' undefined_column. PGRST204 is PostgREST failing to find
+  // it in its cached schema, which is what actually comes back through the
+  // client. The message check is the backstop for either wording changing.
+  if (error.code === '42703' || error.code === 'PGRST204') return true;
+  return typeof error.message === 'string' && error.message.includes(column);
 }
 
 /** Update only the named columns — used by the Gmail scan to reconcile drift. */
@@ -257,9 +302,20 @@ export async function keepSubscription(sub: Subscription): Promise<Subscription>
       // Rolled to the present before being advanced. Advancing the stored date
       // alone moved a three-month-stale subscription to two months stale, so
       // the reminder came straight back and "Keep it" looked like a dead button.
+      // The anchor is what stops this drifting. Advancing from the stored date
+      // alone loses the billing day the first time it crosses a February: 31
+      // January is stored as 28 February, the next advance gives 28 March, and
+      // every renewal after that is three days early forever. Passing the
+      // anchor through both steps keeps 31 -> 28 Feb -> 31 Mar.
       next_renewal: advanceRenewal(
-        currentRenewal(sub.next_renewal, sub.billing_cycle, toISODate(new Date())),
+        currentRenewal(
+          sub.next_renewal,
+          sub.billing_cycle,
+          toISODate(new Date()),
+          sub.anchor_day,
+        ),
         sub.billing_cycle,
+        sub.anchor_day,
       ),
       snoozed_until: null,
     })
@@ -328,7 +384,7 @@ export function deriveReminders(subs: Subscription[], today: Date = new Date()):
      * `next_renewal` is replaced on the item too, so every screen reading this
      * list agrees with the day count beside it.
      */
-    const renewal = currentRenewal(s.next_renewal, s.billing_cycle, todayISO);
+    const renewal = currentRenewal(s.next_renewal, s.billing_cycle, todayISO, s.anchor_day);
     const daysLeft = daysUntilISO(renewal, today);
     if (daysLeft === null) continue;
 

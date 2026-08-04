@@ -36,11 +36,31 @@ export const CYCLE_DAYS: Record<BillingCycle, number> = {
 };
 
 /**
+ * The day of the month a subscription bills on, read off a date.
+ *
+ * Only ever a fallback. A date that has already been clamped reports the day it
+ * was clamped *to* — 28 for something that really bills on the 31st — which is
+ * the whole reason `anchor_day` is stored separately.
+ */
+export function anchorDayOf(iso: string): number | null {
+  const d = Number(iso.split('-')[2]);
+  return Number.isInteger(d) && d >= 1 && d <= 31 ? d : null;
+}
+
+/**
  * The next renewal after `nextRenewalISO`, one cycle later.
  *
  * The month-end clamp is the part that matters: 31 January on a monthly cycle
  * has to land on 28 (or 29) February, because letting the day overflow puts it
  * in March and every subsequent renewal is then a month adrift.
+ *
+ * `anchorDay` is the day the merchant actually bills on, which is not always the
+ * day the stored date carries. Clamping is lossy: once 31 January has become 28
+ * February and been written back, stepping from the 28th gives 28 March, and the
+ * 31st is gone for good — every later renewal three days early, forever. Passing
+ * the anchor keeps 31 → 28 Feb → 31 Mar → 30 Apr, which is what the merchant
+ * does. Without it this falls back to the stored day and behaves as it always
+ * did, which is what makes the column safe to add after the fact.
  *
  * Built with `Date.UTC` and read back with `toISOString`, so both ends are on
  * the same clock and no timezone can shift the day. That is safe *here* because
@@ -48,25 +68,29 @@ export const CYCLE_DAYS: Record<BillingCycle, number> = {
  * anywhere that starts from `new Date()`; use src/dates.ts for those. See the
  * note in README.md.
  */
-export function advanceRenewal(nextRenewalISO: string, cycle: string): string {
+export function advanceRenewal(
+  nextRenewalISO: string,
+  cycle: string,
+  anchorDay?: number | null,
+): string {
   const [y, m, d] = nextRenewalISO.split('-').map(Number);
   if (!y || !m || !d) return nextRenewalISO;
 
   if (cycle === 'weekly') {
+    // A weekly cycle has no day of the month to anchor to, so the anchor is
+    // meaningless here and deliberately ignored.
     return utcDateString(y, m - 1, d + 7);
   }
 
+  const day = anchorDay ?? d;
+
   if (cycle === 'yearly') {
-    // Day 0 of the following month is the last day of this one.
-    const lastDay = new Date(Date.UTC(y + 1, m, 0)).getUTCDate();
-    return utcDateString(y + 1, m - 1, Math.min(d, lastDay));
+    return clampedDay(y + 1, m - 1, day);
   }
 
-  // monthly
-  const ny = m === 12 ? y + 1 : y;
-  const nm = m === 12 ? 1 : m + 1;
-  const lastDay = new Date(Date.UTC(ny, nm, 0)).getUTCDate();
-  return utcDateString(ny, nm - 1, Math.min(d, lastDay));
+  // monthly. clampedDay normalises a month index of 12 into January of the
+  // following year, so December needs no special case.
+  return clampedDay(y, m, day);
 }
 
 /**
@@ -84,13 +108,19 @@ export function advanceRenewal(nextRenewalISO: string, cycle: string): string {
  * Takes today as a string rather than a Date so this file stays free of
  * timezone handling and of dependencies — see the note above `advanceRenewal`.
  */
-export function currentRenewal(nextRenewalISO: string, cycle: string, todayISO: string): string {
+export function currentRenewal(
+  nextRenewalISO: string,
+  cycle: string,
+  todayISO: string,
+  anchorDay?: number | null,
+): string {
   // ISO days compare correctly as plain strings, which avoids constructing
   // dates only to throw them away.
   if (nextRenewalISO >= todayISO) return nextRenewalISO;
 
-  const [y, m, d] = nextRenewalISO.split('-').map(Number);
-  if (!y || !m || !d) return nextRenewalISO;
+  const [y, m, dStored] = nextRenewalISO.split('-').map(Number);
+  if (!y || !m || !dStored) return nextRenewalISO;
+  const d = anchorDay ?? dStored;
 
   /*
    * Counted from the stored date, not stepped from it.
@@ -107,8 +137,12 @@ export function currentRenewal(nextRenewalISO: string, cycle: string, todayISO: 
    * seventy-six years.
    */
   if (cycle === 'weekly') {
+    // dStored, not the anchor. A weekly cycle has no day of the month to hold
+    // on to — what matters is which weekday it lands on, and stepping in sevens
+    // from the stored date is what preserves that. Substituting an anchor day
+    // here would move the subscription to a different weekday entirely.
     for (let k = 1; k < 4000; k += 1) {
-      const at = utcDateString(y, m - 1, d + k * 7);
+      const at = utcDateString(y, m - 1, dStored + k * 7);
       if (at >= todayISO) return at;
     }
     return nextRenewalISO;

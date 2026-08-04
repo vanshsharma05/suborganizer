@@ -69,6 +69,29 @@ alter table public.subscriptions
   add column if not exists is_trial   boolean not null default false,
   add column if not exists trial_ends date;
 
+-- The day of the month the merchant actually bills on.
+--
+-- It cannot be read back off next_renewal, because clamping is lossy. A
+-- subscription billed on the 31st has to land on 28 February, and once that
+-- date is stored the 31st is gone: the next advance starts from the 28th and
+-- gives 28 March, so the renewal slides three days early and stays there
+-- forever. Keeping the anchor separately is the only way 31 -> 28 Feb -> 31 Mar
+-- survives a February.
+--
+-- Nullable on purpose. The client falls back to the day in next_renewal when it
+-- is absent, which is exactly the old behaviour, so the app keeps working
+-- against a database where this has not been run yet.
+alter table public.subscriptions
+  add column if not exists anchor_day integer
+    check (anchor_day is null or (anchor_day between 1 and 31));
+
+-- Backfill. The best available answer, not a perfect one: a row already sitting
+-- on a clamped 28 February backfills as 28, and nothing anywhere still knows it
+-- was once the 31st. No worse than the current behaviour, and right from here on.
+update public.subscriptions
+   set anchor_day = extract(day from next_renewal)::int
+ where anchor_day is null;
+
 -- The app's hottest read is "my subs, soonest renewal first" (dashboard,
 -- calendar, reminders all sort by it), so index the pair.
 create index if not exists subscriptions_user_renewal_idx

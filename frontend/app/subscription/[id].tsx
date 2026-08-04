@@ -39,7 +39,7 @@ import { BrandAvatar, Button, Field, IconButton, Segmented } from '@/src/ui';
 import { Press, Reveal } from '@/src/motion';
 import { DateSheet } from '@/src/date-sheet';
 import { CURRENCIES, fmtMoney, symbolFor } from '@/src/currency';
-import { monthlyEquivalent } from '@/src/cycles';
+import { anchorDayOf, monthlyEquivalent } from '@/src/cycles';
 import { addDaysISO, parseISODate } from '@/src/dates';
 
 type Cycle = 'weekly' | 'monthly' | 'yearly';
@@ -251,6 +251,16 @@ function Form({
         category,
         currency,
         next_renewal: date,
+        // The billing day only moves when the user actually moves the date.
+        //
+        // Deriving it from `date` unconditionally would be wrong for one month
+        // a year: a subscription billed on the 31st sits on 28 February for
+        // that month, and someone correcting a typo in the name would silently
+        // rewrite the anchor to 28 — losing the 31st for good, which is the
+        // exact bug the column exists to prevent.
+        anchor_day: date === existing?.next_renewal
+          ? existing?.anchor_day ?? anchorDayOf(date)
+          : anchorDayOf(date),
         domain: domain.trim() || null,
         notes: notes.trim() || null,
         brand_color: existing?.brand_color ?? null,

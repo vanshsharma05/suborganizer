@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { advanceRenewal, currentRenewal, CYCLE_DAYS, monthlyEquivalent } from './cycles';
+import {
+  advanceRenewal, anchorDayOf, currentRenewal, CYCLE_DAYS, monthlyEquivalent,
+} from './cycles';
 
 describe('monthlyEquivalent', () => {
   it('leaves a monthly amount alone', () => {
@@ -175,5 +177,100 @@ describe('currentRenewal', () => {
     for (const [start, cycle] of cases) {
       expect(currentRenewal(start, cycle, '2026-08-03') >= '2026-08-03').toBe(true);
     }
+  });
+});
+
+describe('anchorDayOf', () => {
+  it('reads the day off an ISO date', () => {
+    expect(anchorDayOf('2026-01-31')).toBe(31);
+    expect(anchorDayOf('2026-02-01')).toBe(1);
+  });
+
+  it('is null for anything it cannot read', () => {
+    expect(anchorDayOf('')).toBeNull();
+    expect(anchorDayOf('2026-02')).toBeNull();
+    expect(anchorDayOf('not-a-date')).toBeNull();
+  });
+});
+
+/**
+ * The bug this exists to stop.
+ *
+ * Clamping is lossy. 31 January becomes 28 February, and once that has been
+ * written back, stepping from the 28th gives 28 March — so a subscription that
+ * really bills on the 31st slides three days early and stays there, forever,
+ * the first time it crosses a February.
+ */
+describe('advanceRenewal with an anchor day', () => {
+  it('returns to the anchor after a short month', () => {
+    // The exact drift: without the anchor this is 28 March.
+    expect(advanceRenewal('2026-02-28', 'monthly', 31)).toBe('2026-03-31');
+  });
+
+  it('survives a whole year of short months', () => {
+    const anchor = 31;
+    let at = '2026-01-31';
+    const seen: string[] = [];
+    for (let i = 0; i < 12; i += 1) {
+      at = advanceRenewal(at, 'monthly', anchor);
+      seen.push(at);
+    }
+    expect(seen).toEqual([
+      '2026-02-28', '2026-03-31', '2026-04-30', '2026-05-31',
+      '2026-06-30', '2026-07-31', '2026-08-31', '2026-09-30',
+      '2026-10-31', '2026-11-30', '2026-12-31', '2027-01-31',
+    ]);
+  });
+
+  it('clamps to a leap February and comes back', () => {
+    expect(advanceRenewal('2028-01-31', 'monthly', 31)).toBe('2028-02-29');
+    expect(advanceRenewal('2028-02-29', 'monthly', 31)).toBe('2028-03-31');
+  });
+
+  it('holds the 30th through February too', () => {
+    expect(advanceRenewal('2026-02-28', 'monthly', 30)).toBe('2026-03-30');
+  });
+
+  it('carries December into January', () => {
+    expect(advanceRenewal('2026-12-31', 'monthly', 31)).toBe('2027-01-31');
+  });
+
+  it('anchors a yearly cycle across a leap year', () => {
+    expect(advanceRenewal('2028-02-29', 'yearly', 29)).toBe('2029-02-28');
+    expect(advanceRenewal('2029-02-28', 'yearly', 29)).toBe('2030-02-28');
+  });
+
+  /** A weekly cycle has no day of the month to hold; it must keep its weekday. */
+  it('ignores the anchor on a weekly cycle', () => {
+    expect(advanceRenewal('2026-02-28', 'weekly', 31)).toBe('2026-03-07');
+  });
+
+  it('behaves exactly as before when no anchor is given', () => {
+    expect(advanceRenewal('2026-02-28', 'monthly')).toBe('2026-03-28');
+    expect(advanceRenewal('2026-01-31', 'monthly')).toBe('2026-02-28');
+    expect(advanceRenewal('2026-01-31', 'monthly', null)).toBe('2026-02-28');
+  });
+});
+
+describe('currentRenewal with an anchor day', () => {
+  it('rolls a stale date forward onto the anchor, not the stored day', () => {
+    // Stored 28 Feb because February clamped it; the merchant bills on the 31st.
+    expect(currentRenewal('2026-02-28', 'monthly', '2026-05-02', 31)).toBe('2026-05-31');
+  });
+
+  it('agrees with the stored day when they are the same', () => {
+    expect(currentRenewal('2026-01-15', 'monthly', '2026-04-02', 15))
+      .toBe(currentRenewal('2026-01-15', 'monthly', '2026-04-02'));
+  });
+
+  it('keeps the weekday on a weekly cycle, anchor or not', () => {
+    const withAnchor = currentRenewal('2026-01-06', 'weekly', '2026-02-01', 31);
+    expect(withAnchor).toBe(currentRenewal('2026-01-06', 'weekly', '2026-02-01'));
+    // 6 Jan 2026 is a Tuesday, and so is the answer.
+    expect(new Date(`${withAnchor}T00:00:00Z`).getUTCDay()).toBe(2);
+  });
+
+  it('still never returns a date in the past', () => {
+    expect(currentRenewal('2026-01-31', 'monthly', '2026-08-03', 31) >= '2026-08-03').toBe(true);
   });
 });
