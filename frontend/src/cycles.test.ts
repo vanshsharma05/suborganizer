@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  advanceRenewal, anchorDayOf, currentRenewal, CYCLE_DAYS, monthlyEquivalent,
+  advanceRenewal, anchorDayOf, currentRenewal, CYCLE_DAYS, monthlyEquivalent, retreatRenewal,
 } from './cycles';
 
 describe('monthlyEquivalent', () => {
@@ -272,5 +272,45 @@ describe('currentRenewal with an anchor day', () => {
 
   it('still never returns a date in the past', () => {
     expect(currentRenewal('2026-01-31', 'monthly', '2026-08-03', 31) >= '2026-08-03').toBe(true);
+  });
+});
+
+describe('retreatRenewal', () => {
+  it('is the exact inverse of advanceRenewal on a clean day', () => {
+    for (const cycle of ['weekly', 'monthly', 'yearly']) {
+      const forward = advanceRenewal('2026-06-15', cycle);
+      expect(retreatRenewal(forward, cycle)).toBe('2026-06-15');
+    }
+  });
+
+  it('steps back onto the anchor rather than the clamped day', () => {
+    expect(retreatRenewal('2026-03-31', 'monthly', 31)).toBe('2026-02-28');
+    expect(retreatRenewal('2026-02-28', 'monthly', 31)).toBe('2026-01-31');
+  });
+
+  it('carries January back into December', () => {
+    expect(retreatRenewal('2026-01-31', 'monthly', 31)).toBe('2025-12-31');
+  });
+
+  it('keeps the weekday on a weekly cycle', () => {
+    expect(retreatRenewal('2026-08-04', 'weekly')).toBe('2026-07-28');
+  });
+
+  it('steps a yearly cycle back a year', () => {
+    expect(retreatRenewal('2026-11-20', 'yearly')).toBe('2025-11-20');
+  });
+
+  it('passes a malformed date through instead of inventing one', () => {
+    expect(retreatRenewal('not-a-date', 'monthly')).toBe('not-a-date');
+    expect(retreatRenewal('', 'monthly')).toBe('');
+  });
+
+  it('always moves backwards, never sideways', () => {
+    let iso = '2027-01-31';
+    for (let i = 0; i < 24; i++) {
+      const back = retreatRenewal(iso, 'monthly', 31);
+      expect(back < iso).toBe(true);
+      iso = back;
+    }
   });
 });

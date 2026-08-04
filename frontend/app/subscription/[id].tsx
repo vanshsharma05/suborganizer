@@ -40,7 +40,8 @@ import { Press, Reveal } from '@/src/motion';
 import { DateSheet } from '@/src/date-sheet';
 import { CURRENCIES, fmtMoney, symbolFor } from '@/src/currency';
 import { anchorDayOf, monthlyEquivalent } from '@/src/cycles';
-import { addDaysISO, parseISODate } from '@/src/dates';
+import { addDaysISO, parseISODate, toISODate } from '@/src/dates';
+import { chargeDates, spentSince, trackedDays } from '@/src/spend-history';
 
 type Cycle = 'weekly' | 'monthly' | 'yearly';
 
@@ -151,7 +152,7 @@ function Form({
 }) {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { refreshSubs } = useAuth();
+  const { refreshSubs, priceChanges } = useAuth();
 
   const [name, setName] = useState(existing?.name ?? '');
   const [amount, setAmount] = useState(existing?.amount ? String(existing.amount) : '');
@@ -215,6 +216,47 @@ function Form({
     () => (valid ? monthlyEquivalent(numeric, cycle) : 0),
     [valid, numeric, cycle],
   );
+
+  /**
+   * What this has already cost, reconstructed from the billing grid.
+   *
+   * Read from `existing` rather than from the form: the form is whatever is
+   * being typed right now, and history is a fact about what was. Changing the
+   * amount in the box must not rewrite what was paid last March.
+   *
+   * Null for anything paused or cancelled — those stopped being charged on a
+   * day nothing recorded, so there is no honest figure to show. See
+   * src/spend-history.ts.
+   */
+  const paid = useMemo(() => {
+    if (!existing) return null;
+
+    const todayISO = toISODate(new Date());
+    const changes = priceChanges.filter((c) => c.subscription_id === existing.id);
+    const total = spentSince({
+      nextRenewalISO: existing.next_renewal,
+      cycle: existing.billing_cycle,
+      anchorDay: existing.anchor_day,
+      amount: existing.amount,
+      status: existing.status,
+      createdAtISO: existing.created_at,
+      changes,
+      todayISO,
+    });
+    if (total === null || total <= 0) return null;
+
+    return {
+      total,
+      charges: chargeDates({
+        nextRenewalISO: existing.next_renewal,
+        cycle: existing.billing_cycle,
+        anchorDay: existing.anchor_day,
+        fromISO: (existing.created_at ?? '').slice(0, 10),
+        todayISO,
+      }).length,
+      days: trackedDays(existing.created_at, todayISO),
+    };
+  }, [existing, priceChanges]);
 
   /**
    * Turning on "free trial" seeds an end date and moves the renewal to match it,
@@ -369,6 +411,29 @@ function Form({
               </View>
             </View>
           </Reveal>
+
+          {/* The one number here that already happened.
+              Everything else on this screen is a projection — what it costs a
+              month, what renews next — and a projection is easy to shrug at.
+              Worded "since you added this" because that is genuinely all the app
+              knows: it has never been told when the subscription actually
+              started, and "total paid" would be a smaller number than the truth
+              wearing the truth's clothes. */}
+          {paid !== null && (
+            <Reveal delay={60}>
+              <View style={s.paid} testID="form-paid">
+                <Ionicons name="receipt-outline" size={15} color={theme.color.inkMuted} />
+                <Text style={s.paidText}>
+                  <Text style={s.paidAmount}>
+                    {fmtMoney(paid.total, existing?.currency ?? currency)}
+                  </Text>
+                  {' since you added this — '}
+                  {paid.charges} {paid.charges === 1 ? 'charge' : 'charges'}
+                  {paid.days >= 30 && ` over ${Math.round(paid.days / 30)} months`}
+                </Text>
+              </View>
+            </Reveal>
+          )}
 
           <Text style={s.label}>What it costs</Text>
           <View style={s.amountRow}>
@@ -595,6 +660,13 @@ const s = StyleSheet.create({
   previewTrial: { ...theme.type.caption, color: theme.color.brandSecondary, fontWeight: '700' },
   previewAmount: { fontSize: 19, fontWeight: '800', color: theme.color.ink, letterSpacing: -0.6 },
   previewMonthly: { ...theme.type.caption, color: theme.color.brandSecondary, fontWeight: '700' },
+
+  paid: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    marginTop: 10, paddingHorizontal: 4,
+  },
+  paidText: { flex: 1, ...theme.type.caption, color: theme.color.inkMuted },
+  paidAmount: { fontWeight: '800', color: theme.color.inkSoft },
 
   label: { ...theme.type.overline, color: theme.color.inkMuted, marginTop: 26, marginBottom: 10 },
 

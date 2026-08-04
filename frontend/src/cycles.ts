@@ -94,6 +94,35 @@ export function advanceRenewal(
 }
 
 /**
+ * One cycle *earlier* — the renewal before this one.
+ *
+ * The mirror of `advanceRenewal`, and it needs the anchor for the same reason:
+ * stepping back from 31 March without one gives 28 February, and stepping back
+ * again gives 28 January rather than the 31st.
+ *
+ * Used to reconstruct the charges that have already happened, which is the only
+ * way to answer what something has cost so far — nothing records the payments
+ * themselves.
+ */
+export function retreatRenewal(
+  nextRenewalISO: string,
+  cycle: string,
+  anchorDay?: number | null,
+): string {
+  const [y, m, d] = nextRenewalISO.split('-').map(Number);
+  if (!y || !m || !d) return nextRenewalISO;
+
+  if (cycle === 'weekly') return utcDateString(y, m - 1, d - 7);
+
+  const day = anchorDay ?? d;
+  if (cycle === 'yearly') return clampedDay(y - 1, m - 1, day);
+
+  // monthly. A month index of -1 is December of the previous year; Date.UTC
+  // normalises it, so January needs no special case.
+  return clampedDay(y, m - 2, day);
+}
+
+/**
  * Where a renewal date has actually got to by `todayISO`.
  *
  * `advanceRenewal` moves exactly one cycle, which is right when something has
