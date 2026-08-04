@@ -17,6 +17,7 @@ import {
   StyleSheet, Text, TextInput, View,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { StatusBar } from 'expo-status-bar';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -90,6 +91,9 @@ export default function ResetPassword() {
 
   return (
     <View style={s.root}>
+      {/* Coral behind the clock, same as the sign-in screen. See auth.tsx. */}
+      <StatusBar style="light" />
+
       <LinearGradient
         colors={theme.color.coralGradient}
         start={{ x: 0.1, y: 0 }}

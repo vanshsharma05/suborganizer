@@ -1,7 +1,10 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import * as AppleAuthentication from 'expo-apple-authentication';
 import * as AuthSession from 'expo-auth-session';
 import Constants from 'expo-constants';
+import * as Crypto from 'expo-crypto';
 import * as WebBrowser from 'expo-web-browser';
+import { describeAppleError, greetingName, nameToStore, wasCancelled } from './apple';
 import { describeError, supabase } from './supabase';
 import { disconnectGmail } from './gmail/auth';
 import { invalidateReminderCache } from './notifications';
@@ -13,6 +16,7 @@ import {
   listSubscriptions,
   PriceChange,
   ReminderItem,
+  setDisplayName,
   Subscription,
   User,
 } from './api';
@@ -52,6 +56,11 @@ type AuthCtx = {
     password: string,
   ) => Promise<{ needsConfirmation: boolean }>;
   signInWithGoogle: () => Promise<void>;
+  /**
+   * Native Sign in with Apple. Resolves without a session if the user dismissed
+   * Apple's sheet, which is not a failure and must not be reported as one.
+   */
+  signInWithApple: () => Promise<void>;
   /** Emails a recovery link. Resolves whether or not the address has an account. */
   resetPassword: (email: string) => Promise<void>;
   /** Sets a new password for the session a recovery link opened. */
@@ -93,7 +102,9 @@ function userFromSession(u: {
   return {
     id: u.id,
     email: u.email ?? '',
-    name: named?.trim() ?? u.email?.split('@')[0] ?? 'there',
+    // greetingName rather than a plain fallback to the local part: an Apple user
+    // who chose "Hide My Email" has ten characters of hex there. See apple.ts.
+    name: greetingName({ storedName: named, email: u.email }),
     // Deliberately conservative defaults. Both are overwritten by fetchProfile;
     // guessing "pro" from a stale token would unlock paid UI on a cold start.
     is_pro: false,
@@ -281,6 +292,70 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   /**
+   * Sign in with Apple.
+   *
+   * Native rather than a web redirect, which is what Apple requires on iOS and
+   * also what makes it one tap and a Face ID glance. There is no browser here at
+   * all: Apple hands back a signed identity token and Supabase verifies it.
+   *
+   * The nonce is the part worth reading twice. A random value is generated here,
+   * its SHA-256 hash goes to Apple, and Apple embeds *the hash* in the token it
+   * signs. Supabase is then given the original, hashes it, and checks the two
+   * match — which is what stops a token intercepted from one sign-in being
+   * replayed into another. Sending the same value to both sides would verify
+   * happily and prove nothing.
+   */
+  const signInWithApple = async () => {
+    // randomUUID is a v4 UUID: 122 bits of entropy, far past what a one-shot
+    // nonce needs, and no encoding decisions to get wrong on the way to Apple.
+    const rawNonce = Crypto.randomUUID();
+    const hashedNonce = await Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA256,
+      rawNonce,
+    );
+
+    let credential: AppleAuthentication.AppleAuthenticationCredential;
+    try {
+      credential = await AppleAuthentication.signInAsync({
+        requestedScopes: [
+          AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+          AppleAuthentication.AppleAuthenticationScope.EMAIL,
+        ],
+        nonce: hashedNonce,
+      });
+    } catch (e) {
+      // Apple's sheet is dismissed by tapping outside it, which people do by
+      // accident. Returning quietly leaves them where they were.
+      if (wasCancelled(e)) return;
+      throw new Error(describeAppleError(e));
+    }
+
+    const { identityToken } = credential;
+    if (!identityToken) throw new Error('Apple did not return an identity token.');
+
+    const { data, error } = await supabase.auth.signInWithIdToken({
+      provider: 'apple',
+      token: identityToken,
+      nonce: rawNonce,
+    });
+    if (error) throw new Error(describeError(error, 'Apple sign-in failed.'));
+
+    // Apple sends the name on the first authorization and never again, so this
+    // is the only moment it can be captured. Unawaited failure is deliberate:
+    // the session is already valid, and a name is not worth failing a sign-in
+    // over — the greeting falls back to something human either way.
+    const stored = data.user?.user_metadata?.full_name;
+    const name = nameToStore(
+      credential.fullName,
+      typeof stored === 'string' ? stored : null,
+    );
+    if (name) {
+      await setDisplayName(name).catch(() => {});
+      setUser((u) => (u ? { ...u, name } : u));
+    }
+  };
+
+  /**
    * Sends the recovery email.
    *
    * Deliberately silent about whether the address exists. Reporting "no account
@@ -341,6 +416,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         signInWithEmail,
         signUpWithEmail,
         signInWithGoogle,
+        signInWithApple,
         resetPassword,
         updatePassword,
         logout,

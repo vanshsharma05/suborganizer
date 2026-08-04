@@ -12,9 +12,13 @@
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.suborganizer.app",
-      "buildNumber": "1"
+      "buildNumber": "1",
+      "usesAppleSignIn": true,
+      "config": {
+        "usesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -34,6 +38,7 @@
       "expo-router",
       "expo-notifications",
       "expo-iap",
+      "expo-apple-authentication",
       [
         "expo-splash-screen",
         {

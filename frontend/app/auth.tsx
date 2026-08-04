@@ -19,7 +19,9 @@ import {
   View, Text, TextInput, StyleSheet, KeyboardAvoidingView, Platform,
   ScrollView, ActivityIndicator, useWindowDimensions,
 } from 'react-native';
+import * as AppleAuthentication from 'expo-apple-authentication';
 import { LinearGradient } from 'expo-linear-gradient';
+import { StatusBar } from 'expo-status-bar';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -79,7 +81,9 @@ export default function AuthScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { width } = useWindowDimensions();
-  const { signInWithEmail, signUpWithEmail, signInWithGoogle, resetPassword, user } = useAuth();
+  const {
+    signInWithEmail, signUpWithEmail, signInWithGoogle, signInWithApple, resetPassword, user,
+  } = useAuth();
 
   const [showEmail, setShowEmail] = useState(false);
   const [mode, setMode] = useState<'login' | 'signup'>('login');
@@ -92,6 +96,13 @@ export default function AuthScreen() {
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [googleBusy, setGoogleBusy] = useState(false);
+  const [appleBusy, setAppleBusy] = useState(false);
+  /**
+   * Whether this device can do Sign in with Apple. Starts false rather than
+   * true: the button appearing and then vanishing a frame later is worse than
+   * it arriving a frame late, and on Android the answer is always no.
+   */
+  const [appleReady, setAppleReady] = useState(false);
 
   const emailRef = useRef<TextInput>(null);
   const passwordRef = useRef<TextInput>(null);
@@ -119,6 +130,19 @@ export default function AuthScreen() {
   useEffect(() => {
     if (user) router.replace('/');
   }, [user, router]);
+
+  // iOS 13 and up, and never on Android. Asked rather than assumed from the
+  // platform, because the answer is the module's to give.
+  useEffect(() => {
+    let alive = true;
+    if (Platform.OS !== 'ios') return;
+
+    AppleAuthentication.isAvailableAsync()
+      .then((ok) => { if (alive) setAppleReady(ok); })
+      .catch(() => { /* Treated as unavailable; Google and email still work. */ });
+
+    return () => { alive = false; };
+  }, []);
 
   const submit = async () => {
     setErr(null);
@@ -172,6 +196,19 @@ export default function AuthScreen() {
     }
   };
 
+  const appleSignIn = async () => {
+    setErr(null);
+    setNotice(null);
+    setAppleBusy(true);
+    try {
+      await signInWithApple();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : 'Apple sign-in failed');
+    } finally {
+      setAppleBusy(false);
+    }
+  };
+
   /**
    * Reports success without confirming the address has an account, which is the
    * same thing Supabase does and for the same reason.
@@ -200,6 +237,13 @@ export default function AuthScreen() {
 
   return (
     <View style={s.root}>
+      {/* The root layout switches to dark the moment the splash starts fading,
+          which is right for every screen but this one and the reset screen —
+          both of which are still full coral. Mounted after the root's, so this
+          wins for as long as this screen is on top; the clock and the battery
+          are dark grey on coral without it. */}
+      <StatusBar style="light" />
+
       <LinearGradient
         colors={theme.color.coralGradient}
         start={{ x: 0.1, y: 0 }}
@@ -282,7 +326,39 @@ export default function AuthScreen() {
 
           {!showEmail ? (
             <Animated.View entering={FadeInUp.delay(680).duration(600)}>
-              <Press onPress={googleSignIn} disabled={googleBusy} haptic="medium" testID="auth-google">
+              {/* Apple leads on iOS. Their guidelines require it to be at least
+                  as prominent as any other sign-in option, and this is their own
+                  component — a custom button that merely looks like it is a
+                  rejection, however faithfully drawn.
+
+                  WHITE at radius 28 is s.primary exactly, so the two buttons
+                  read as one pair rather than as a native control dropped into
+                  somebody else's screen. */}
+              {appleReady && (
+                <View style={s.appleWrap}>
+                  <AppleAuthentication.AppleAuthenticationButton
+                    buttonType={AppleAuthentication.AppleAuthenticationButtonType.CONTINUE}
+                    buttonStyle={AppleAuthentication.AppleAuthenticationButtonStyle.WHITE}
+                    cornerRadius={28}
+                    style={s.apple}
+                    onPress={appleSignIn}
+                  />
+                  {/* Apple's button draws its own label and cannot host a
+                      spinner, so the wait is shown over the top of it. */}
+                  {appleBusy && (
+                    <View style={s.appleBusy} pointerEvents="none">
+                      <ActivityIndicator color={theme.color.brandDeep} />
+                    </View>
+                  )}
+                </View>
+              )}
+
+              <Press
+                onPress={googleSignIn}
+                disabled={googleBusy || appleBusy}
+                haptic="medium"
+                testID="auth-google"
+              >
                 <View style={s.primary}>
                   {googleBusy ? (
                     <ActivityIndicator color={theme.color.brandDeep} />
@@ -502,6 +578,25 @@ const s = StyleSheet.create({
     height: 56, borderRadius: theme.radius.pill, backgroundColor: '#FFFFFF',
   },
   primaryText: { color: theme.color.brandDeep, fontSize: 15.5, fontWeight: '800' },
+
+  appleWrap: { marginBottom: 12 },
+  /**
+   * Height and width have to be explicit. Apple's button is a native view with
+   * no intrinsic size in React Native, and without these it lays out at zero and
+   * simply is not there.
+   *
+   * 56 matches s.primary, and 28 is half of it — the same shape as the pill
+   * radius resolves to, since a real number is what the native side wants.
+   * backgroundColor and borderRadius are set through buttonStyle and
+   * cornerRadius rather than here: overriding them in `style` does nothing and
+   * is against the guidelines besides.
+   */
+  apple: { width: '100%', height: 56 },
+  appleBusy: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#FFFFFF', borderRadius: 28,
+  },
 
   ghost: { alignItems: 'center', paddingVertical: 16 },
   ghostText: { color: 'rgba(255,255,255,0.88)', fontSize: 14, fontWeight: '700' },

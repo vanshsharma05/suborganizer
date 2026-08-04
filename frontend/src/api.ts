@@ -1,3 +1,4 @@
+import { greetingName } from './apple';
 import { advanceRenewal, currentRenewal } from './cycles';
 import { addDaysISO, daysUntilISO, toISODate } from './dates';
 import { describeError, supabase } from './supabase';
@@ -83,10 +84,32 @@ export async function fetchProfile(): Promise<User | null> {
   return {
     id: auth.user.id,
     email: auth.user.email ?? '',
-    name: profile?.name ?? auth.user.email?.split('@')[0] ?? 'there',
+    // Not `profile.name ?? localPart`: for anyone who signed in with Apple and
+    // chose "Hide My Email", the local part is ten characters of hex, and the
+    // signup trigger has already stored it *as* their name. greetingName knows
+    // what that looks like. See apple.ts.
+    name: greetingName({ storedName: profile?.name, email: auth.user.email }),
     is_pro: profile?.is_pro ?? false,
     primary_currency: profile?.primary_currency ?? 'INR',
   };
+}
+
+/**
+ * Sets the name shown in the greeting.
+ *
+ * Written to the profile row rather than auth metadata because that row is what
+ * fetchProfile reads; the metadata is updated alongside it so a fresh session
+ * derived from the token alone says the same thing before any request lands.
+ */
+export async function setDisplayName(name: string): Promise<void> {
+  const trimmed = name.trim();
+  if (!trimmed) return;
+
+  const id = await currentUserId();
+  const { error } = await supabase.from('profiles').update({ name: trimmed }).eq('id', id);
+  if (error) throw new Error(error.message);
+
+  await supabase.auth.updateUser({ data: { full_name: trimmed } });
 }
 
 export async function updatePrimaryCurrency(currency: string): Promise<void> {
