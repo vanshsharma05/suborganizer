@@ -110,8 +110,31 @@ the Account Holder has to revoke and regenerate.
       audience is the *bundle ID*, and Supabase rejects it without this. It is
       the single most common way native Apple sign-in fails from a
       correct-looking setup.
-- [ ] `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID` in `eas.json` — the Gmail scan reads it
-      (`src/gmail/auth.ts`) and throws a configuration error on iOS without it
+### The Gmail scan on iOS — done, 5 August 2026
+
+Two things, and the second is the one that is easy to miss.
+
+`EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID` is in `eas.json`. `src/gmail/auth.ts` picks a
+different OAuth client per platform, and without this it refuses on iOS rather
+than starting a flow that cannot finish.
+
+**The reversed client id is registered as a URL scheme** in `app.json`:
+
+```
+com.googleusercontent.apps.935820170470-evvedc5smq09brul8afcf8f0cl4rdthq
+```
+
+Google sends the iOS consent result back to `<reversed-id>:/gmail-callback`, and
+iOS only delivers a URL to an app that declares its scheme. Without this the
+consent sheet opens, the user approves, and nothing comes back — a hang with no
+error anywhere, which is the worst shape a bug can take.
+
+Appended rather than prepended: `appScheme()` in `auth-context.tsx` reads
+`scheme[0]`, and that has to stay `suborganizer` or Supabase sign-in breaks.
+
+The development variant replaces the scheme list wholesale in `app.config.js`,
+so an iOS dev build would need its own OAuth client and its own reversed scheme.
+Nothing needs that yet.
 - [ ] Paid Apps agreement is **Pending User Info**: two US tax forms are
       unsubmitted and only the Account Holder can sign them. Nothing is for sale
       on iOS, so this blocks nothing today — it blocks in-app purchases whenever

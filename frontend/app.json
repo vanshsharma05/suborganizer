@@ -7,7 +7,8 @@
     "icon": "./assets/images/icon.png",
     "scheme": [
       "suborganizer",
-      "com.suborganizer.app"
+      "com.suborganizer.app",
+      "com.googleusercontent.apps.935820170470-evvedc5smq09brul8afcf8f0cl4rdthq"
     ],
     "userInterfaceStyle": "light",
     "newArchEnabled": true,
