@@ -49,7 +49,7 @@
   "submit": {
     "production": {
       "android": {
-        "track": "internal"
+        "track": "alpha"
       },
       "ios": {
         "appleTeamId": "87ZSB7PJYF",

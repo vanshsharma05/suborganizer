@@ -225,10 +225,24 @@ export function cancelledAtStore(pm: PaymentMethod | null | undefined): boolean 
  * anything without a migration to a structured type, and so a row written by an
  * older client is still readable. Empty fields stay empty rather than being
  * omitted, which keeps the position of each part fixed.
+ *
+ * **The last four digits are deliberately not stored.** They are read from the
+ * receipt, used on the device, and dropped here.
+ *
+ * Play's Data Safety form asks whether the app collects "financial info — user
+ * payment info", and this app's declaration says it does not. Masked digits are
+ * arguably not a card number, but arguable is the wrong place to be: a
+ * declaration that does not match behaviour is what gets an app flagged, and
+ * being right in the end is no comfort if a release is pulled first.
+ *
+ * The cost is small. "Visa ···· 4242" becomes "Visa", and the cases that carry
+ * the most weight — UPI, and the App Store or Play holding the mandate — say
+ * exactly as much as they did. If the declaration is ever updated on purpose,
+ * this is one line to put back.
  */
 export function packPaymentMethod(pm: PaymentMethod | null | undefined): string | null {
   if (!pm) return null;
-  return [pm.kind, pm.brand ?? '', pm.last4 ?? '', pm.autopay ? '1' : ''].join('|');
+  return [pm.kind, pm.brand ?? '', '', pm.autopay ? '1' : ''].join('|');
 }
 
 const KINDS: ReadonlySet<string> = new Set<PaymentKind>([

@@ -177,15 +177,33 @@ describe('cancelledAtStore', () => {
 });
 
 describe('pack and unpack', () => {
-  it('round-trips everything', () => {
+  it('round-trips everything except the digits', () => {
     for (const pm of [
-      { kind: 'card', brand: 'Visa', last4: '4242', autopay: true },
       { kind: 'card', autopay: false },
       { kind: 'upi', brand: 'PhonePe', autopay: false },
       { kind: 'appstore', brand: 'Apple', autopay: true },
     ] as const) {
       expect(unpackPaymentMethod(packPaymentMethod(pm))).toEqual(pm);
     }
+  });
+
+  /**
+   * The last four digits never reach the database.
+   *
+   * Play's Data Safety form declares that this app does not collect financial
+   * payment info, and a declaration that does not match behaviour is what gets
+   * an app flagged — regardless of whether masked digits would have counted.
+   */
+  it('never stores the last four digits', () => {
+    const packed = packPaymentMethod({
+      kind: 'card', brand: 'Visa', last4: '4242', autopay: true,
+    });
+    expect(packed).not.toContain('4242');
+    expect(unpackPaymentMethod(packed)?.last4).toBeUndefined();
+    // Everything else survives.
+    expect(unpackPaymentMethod(packed)).toEqual({
+      kind: 'card', brand: 'Visa', last4: undefined, autopay: true,
+    });
   });
 
   it('is null in, null out', () => {
