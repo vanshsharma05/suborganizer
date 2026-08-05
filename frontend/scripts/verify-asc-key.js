@@ -174,7 +174,11 @@ async function call(path) {
      *
      * APPLE_ID_AUTH is Apple's name for the capability.
      */
-    const caps = await call(`/v1/bundleIds/${bundleId}/bundleIdCapabilities?limit=50`);
+    // No `limit` here. This relationship rejects it outright — 400, "The
+    // parameter 'limit' can not be used with this request" — which is easy to
+    // mistake for a permissions problem, since it arrives looking like any
+    // other failed call.
+    const caps = await call(`/v1/bundleIds/${bundleId}/bundleIdCapabilities`);
     if (caps.status !== 200) {
       console.log(`  ? ${identifier} — registered, but its capabilities could not be read`);
       continue;
