@@ -144,13 +144,64 @@ async function call(path) {
 
   console.log('  ✓ The key can manage bundle identifiers — Admin access confirmed.');
 
-  const ids = (bundles.body?.data ?? []).map((b) => b.attributes?.identifier);
-  const wanted = ['com.suborganizer.app', 'com.suborganizer.app.dev'];
-  for (const id of wanted) {
-    console.log(ids.includes(id) ? `  ✓ ${id} is registered.` : `  · ${id} not registered yet.`);
+  // ------------------------------------------------------ the identifiers --
+
+  console.log('');
+
+  const missing = [];
+  const registered = new Map(
+    (bundles.body?.data ?? []).map((b) => [b.attributes?.identifier, b.id]),
+  );
+
+  for (const identifier of ['com.suborganizer.app', 'com.suborganizer.app.dev']) {
+    const bundleId = registered.get(identifier);
+
+    if (!bundleId) {
+      console.log(`  ✗ ${identifier} — not registered`);
+      missing.push(`Register ${identifier}`);
+      continue;
+    }
+
+    /*
+     * Registered is not the same as ready.
+     *
+     * Sign in with Apple is a checkbox on the registration screen, easy to skip,
+     * and nothing afterwards mentions it. The identifier looks completely
+     * correct in the list either way. What happens instead is that the build
+     * fails on a missing entitlement much later, by which point the only person
+     * who can tick it may be unreachable — which is the entire reason this
+     * script exists.
+     *
+     * APPLE_ID_AUTH is Apple's name for the capability.
+     */
+    const caps = await call(`/v1/bundleIds/${bundleId}/bundleIdCapabilities?limit=50`);
+    if (caps.status !== 200) {
+      console.log(`  ? ${identifier} — registered, but its capabilities could not be read`);
+      continue;
+    }
+
+    const types = (caps.body?.data ?? []).map((c) => c.attributes?.capabilityType);
+    if (types.includes('APPLE_ID_AUTH')) {
+      console.log(`  ✓ ${identifier} — registered, Sign in with Apple on`);
+    } else {
+      console.log(`  ✗ ${identifier} — registered, but Sign in with Apple is NOT ticked`);
+      missing.push(`Tick "Sign in with Apple" on ${identifier}`);
+    }
   }
 
-  console.log('\n  The key is good. Save all three values somewhere safe.\n');
+  if (missing.length > 0) {
+    console.error('\n  NOT FINISHED — still needed from the Account Holder:\n');
+    for (const item of missing) console.error(`    · ${item}`);
+    console.error(
+      '\n  Both are done at developer.apple.com/account/resources/identifiers/list\n' +
+        '  and neither can be done by anybody else.\n',
+    );
+    process.exit(1);
+  }
+
+  console.log('\n  Everything the API can see is done.');
+  console.log('  Still check by hand: the Sign in with Apple key file, the Team ID,');
+  console.log('  and the agreements — none of those are exposed by the API.\n');
 })().catch((e) => {
   fail(`Could not reach Apple: ${e.message}`, 'Check your connection and try again.');
 });
