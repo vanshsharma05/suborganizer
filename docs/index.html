@@ -3,8 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>SubOrganizer — Track every subscription you pay for</title>
-<meta name="description" content="SubOrganizer helps you track recurring subscriptions, see what you spend each month, and get reminded before you are charged.">
+<!--
+  The title is exactly the app name configured on the OAuth consent screen, and
+  nothing else. Google's branding check compares the two, and a title carrying a
+  tagline as well — "SubOrganizer — Track every subscription you pay for" — was
+  read as a different name and failed verification.
+-->
+<title>SubOrganizer</title>
+<meta name="description" content="SubOrganizer is a mobile app for tracking subscriptions. It keeps every recurring payment in one place, shows what you spend each month, and reminds you before you are charged.">
 <style>
   :root {
     --surface: #FDFBF7; --surface-2: #F4EFE6; --ink: #1A1C1E; --ink-soft: #4A4C4A;
@@ -61,11 +67,25 @@
 </header>
 
 <main class="wrap">
-  <h2>What it does</h2>
+  <!--
+    The purpose statement, first thing on the page and named explicitly.
+
+    Google's check wants the home page to say what the application is for, and
+    the previous wording opened with the problem rather than the product — it
+    described forgetting subscriptions before it said what SubOrganizer is. A
+    reviewer skimming for "this app does X" found no such sentence.
+  -->
+  <h2>What SubOrganizer is</h2>
   <p>
-    Subscriptions are easy to start and easy to forget. SubOrganizer keeps every
-    recurring payment in one place, shows what you actually spend each month, and
-    warns you before the next charge lands.
+    <strong>SubOrganizer is a mobile app for tracking subscriptions.</strong>
+    It keeps every recurring payment you have in one place, works out what they
+    cost you each month, and reminds you before each one is charged — so you can
+    decide whether to keep paying while there is still time to cancel.
+  </p>
+  <p>
+    Subscriptions are easy to start and easy to forget, and most people
+    underestimate how many they have. SubOrganizer exists to make the full list
+    visible, with a real number attached to it.
   </p>
 
   <div class="features">
@@ -87,12 +107,13 @@
     </div>
   </div>
 
-  <h2>About Gmail scanning</h2>
+  <h2>Why SubOrganizer asks for Gmail access</h2>
   <p>
     Connecting Gmail is optional — the app works fully without it. If you do
     connect it, SubOrganizer asks for <strong>read-only</strong> access and uses
     it for one thing: recognising subscriptions from receipts, welcome emails and
-    cancellation notices.
+    cancellation notices, so the ones you have forgotten about appear in your
+    list alongside the ones you added yourself.
   </p>
   <p>
     It reads those emails <strong>on your device</strong>. Nothing is uploaded,
