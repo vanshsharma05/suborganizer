@@ -66,7 +66,7 @@ No ads. No trackers. Nothing sold, ever.
 
 Your data is protected at the database level, so nobody else can read it. Reminders are scheduled on your own device — we cannot see when one fires.
 
-Full privacy policy: https://vanshsharma05.github.io/suborganizer/privacy.html
+Full privacy policy: https://suborganizer.com/privacy.html
 ```
 
 *Roughly 2,100 characters — well inside the limit, and short enough that people
@@ -129,7 +129,7 @@ messages other than the Gmail case above, or anything under advertising.
 ## Privacy policy URL
 
 ```
-https://vanshsharma05.github.io/suborganizer/privacy.html
+https://suborganizer.com/privacy.html
 ```
 
 ## Graphics checklist

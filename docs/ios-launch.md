@@ -77,26 +77,45 @@ dashboard greets people as `a4f9c2e1b8`.
 
 ---
 
-## Needs the Apple Developer account
+## The Apple account — done, 5 August 2026
 
-Nothing below can start until access exists. See the access notes at the bottom.
+Verified against Apple's API, not assumed. Re-run `scripts/verify-asc-key.js`
+any time.
 
-- [ ] Register the bundle ID `com.suborganizer.app` in **Certificates,
-      Identifiers & Profiles**, with the **Sign in with Apple** capability ticked
-- [ ] Create an **App ID** and an **App Store Connect** app record
-- [ ] Create a **Services ID** and a **Sign in with Apple key** (.p8) — Supabase
-      needs both
-- [ ] In Supabase → Authentication → Providers → **Apple**: enable it, paste the
-      Services ID, Team ID, Key ID and the .p8 contents
-- [ ] In the same panel, add `com.suborganizer.app` to **Authorized Client IDs**.
-      The native flow sends a token whose audience is the *bundle ID*, not the
-      Services ID, and Supabase rejects it without this. This is the single most
-      common way native Apple sign-in fails with a correct-looking setup.
-- [ ] Add `com.suborganizer.app.dev` to the same field if the dev variant should
-      sign in too
+- [x] App Store Connect API access granted; **Admin** Team Key `EAS Build`
+- [x] `com.suborganizer.app` registered, **Sign in with Apple** enabled
+- [x] `com.suborganizer.app.dev` registered, **Sign in with Apple** enabled
+- [x] Sign in with Apple key created
+- [x] Free Apps agreement **Active**
+
+| | |
+|---|---|
+| Team ID | `87ZSB7PJYF` (Individual enrolment) |
+| ASC API Key ID | `CQ82WNPH8A` |
+| ASC Issuer ID | `1fcb1b37-3d10-4c4b-b9d1-338575344786` |
+| Sign in with Apple Key ID | `75FUG6BCGL` |
+
+The two `.p8` files live in `C:\Users\vnshh\AppleKeys\`, outside this repo and
+outside OneDrive. `.gitignore` blocks `*.p8` at both root and frontend as a
+second line of defence. **Neither can be downloaded again**; losing one means
+the Account Holder has to revoke and regenerate.
+
+## Still to do
+
+- [ ] Create the **App Store Connect app record** — the bundle ID exists now, so
+      this is unblocked. Its Apple ID becomes `ascAppId` in `eas.json`.
+- [ ] In Supabase → Authentication → Providers → **Apple**: enable it, and add
+      `com.suborganizer.app,com.suborganizer.app.dev` to **Authorized Client
+      IDs**. Leave the secret fields empty — the native flow sends a token whose
+      audience is the *bundle ID*, and Supabase rejects it without this. It is
+      the single most common way native Apple sign-in fails from a
+      correct-looking setup.
 - [ ] `EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID` in `eas.json` — the Gmail scan reads it
       (`src/gmail/auth.ts`) and throws a configuration error on iOS without it
-- [ ] `submit.production.ios` in `eas.json`: `appleId`, `ascAppId`, `appleTeamId`
+- [ ] Paid Apps agreement is **Pending User Info**: two US tax forms are
+      unsubmitted and only the Account Holder can sign them. Nothing is for sale
+      on iOS, so this blocks nothing today — it blocks in-app purchases whenever
+      they come to iOS.
 
 ## Needs a physical iPhone
 

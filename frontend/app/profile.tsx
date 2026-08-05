@@ -31,7 +31,8 @@ import { IconButton, Stat } from '@/src/ui';
 import { Press, Reveal } from '@/src/motion';
 
 const SUPPORT_EMAIL = 'taskteamprosupport@gmail.com';
-const SITE = 'https://vanshsharma05.github.io/suborganizer';
+// The github.io address still redirects here, so older installs keep working.
+const SITE = 'https://suborganizer.com';
 
 const CURRENCY_NAME: Record<string, string> = { INR: 'Indian Rupee', USD: 'US Dollar' };
 

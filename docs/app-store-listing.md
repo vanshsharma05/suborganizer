@@ -123,9 +123,9 @@ First release.
 | **Secondary category** | Productivity |
 | **Age rating** | 4+ |
 | **Price** | Free |
-| **Support URL** | `https://vanshsharma05.github.io/suborganizer/` |
+| **Support URL** | `https://suborganizer.com/` |
 | **Marketing URL** | leave blank |
-| **Privacy Policy URL** | `https://vanshsharma05.github.io/suborganizer/privacy.html` |
+| **Privacy Policy URL** | `https://suborganizer.com/privacy.html` |
 | **Copyright** | `2026 SubOrganizer` |
 | **Contact email** | `taskteamprosupport@gmail.com` |
 
