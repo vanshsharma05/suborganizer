@@ -202,29 +202,6 @@ export function UpgradeSheet({
   );
 }
 
-/**
- * The overlay on a finding the user has not paid for.
- *
- * Deliberately not a blur. Blurred text reads as "there are words here" and the
- * eye slides off it; a solid panel that states the amount and the category is a
- * specific gap, and a specific gap is what makes someone tap. The number is real
- * and the identity is not shown — that asymmetry is the entire offer.
- */
-export function LockedOverlay({ amount, label }: { amount: string; label: string }) {
-  return (
-    <View style={s.locked} testID="locked-overlay">
-      <View style={s.lockBadge}>
-        <Ionicons name="lock-closed" size={12} color="#FFFFFF" />
-      </View>
-      <View style={{ flex: 1 }}>
-        <Text style={s.lockedLabel} numberOfLines={2}>{label}</Text>
-        <Text style={s.lockedHint}>Tap to see which one, and what to do</Text>
-      </View>
-      <Text style={s.lockedAmount}>{amount}</Text>
-    </View>
-  );
-}
-
 const s = StyleSheet.create({
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(20,16,14,0.55)' },
 
@@ -279,18 +256,4 @@ const s = StyleSheet.create({
   },
   dismiss: { alignItems: 'center', paddingVertical: 14 },
   dismissText: { color: theme.color.inkSoft, fontSize: 13.5, fontWeight: '700' },
-
-  locked: {
-    flexDirection: 'row', alignItems: 'center', gap: 11,
-    backgroundColor: theme.color.surfaceSecondary,
-    borderRadius: 14, padding: 12,
-  },
-  lockBadge: {
-    width: 26, height: 26, borderRadius: 9,
-    backgroundColor: theme.color.inkMuted,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  lockedLabel: { color: theme.color.ink, fontSize: 13, fontWeight: '700', lineHeight: 18 },
-  lockedHint: { color: theme.color.inkMuted, fontSize: 11, fontWeight: '600', marginTop: 2 },
-  lockedAmount: { color: theme.color.brandPrimary, fontSize: 15.5, fontWeight: '800', letterSpacing: -0.4 },
 });

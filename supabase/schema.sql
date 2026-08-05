@@ -33,9 +33,15 @@ create policy "profiles: read own"
   on public.profiles for select
   using (auth.uid() = id);
 
+-- The `with check` is spelled out rather than left to default. Postgres does
+-- apply the `using` expression to the updated row when `with check` is omitted,
+-- so this changes nothing at runtime — but the defaulting is easy to misread as
+-- "the new row is unchecked", and on an ownership policy that is not a thing to
+-- leave to a reader's memory.
 create policy "profiles: update own"
   on public.profiles for update
-  using (auth.uid() = id);
+  using (auth.uid() = id)
+  with check (auth.uid() = id);
 
 
 -- ----------------------------------------------------------- subscriptions --
@@ -129,9 +135,12 @@ create policy "subs: insert own"
   on public.subscriptions for insert
   with check (auth.uid() = user_id);
 
+-- Explicit `with check` for the same reason as on profiles: it is what Postgres
+-- already infers from `using`, written down so nobody has to remember that.
 create policy "subs: update own"
   on public.subscriptions for update
-  using (auth.uid() = user_id);
+  using (auth.uid() = user_id)
+  with check (auth.uid() = user_id);
 
 create policy "subs: delete own"
   on public.subscriptions for delete
@@ -156,8 +165,19 @@ create table if not exists public.price_changes (
   changed_at      timestamptz   not null default now()
 );
 
+-- Not for a query: nothing reads this table by subscription_id. It exists for
+-- the `on delete cascade` above — Postgres does not index a foreign key column
+-- on its own, and without this, deleting one subscription scans every price
+-- change in the table to find the rows to remove. Do not drop it as unused.
 create index if not exists price_changes_sub_idx
   on public.price_changes (subscription_id, changed_at desc);
+
+-- The read that actually happens. listPriceChanges asks for "my changes, newest
+-- first" with no subscription filter, and RLS turns that into a user_id
+-- predicate — which the index above cannot serve, because subscription_id leads
+-- it. Without this the query sorts the whole visible set on every open.
+create index if not exists price_changes_user_idx
+  on public.price_changes (user_id, changed_at desc);
 
 alter table public.price_changes enable row level security;
 

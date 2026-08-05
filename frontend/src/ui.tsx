@@ -278,57 +278,7 @@ const card = StyleSheet.create({
   },
 });
 
-// ------------------------------------------------------------------- chips --
-
-export function Chip({
-  label, active, onPress, icon, count, testID,
-}: {
-  label: string;
-  active?: boolean;
-  onPress?: () => void;
-  icon?: Icon;
-  count?: number;
-  testID?: string;
-}) {
-  return (
-    <Press onPress={onPress} testID={testID} scale={0.94} haptic="light">
-      <View style={[chip.base, active && chip.active]}>
-        {icon && (
-          <Ionicons name={icon} size={13} color={active ? '#FFFFFF' : theme.color.inkSoft} />
-        )}
-        <Text style={[chip.label, active && chip.labelActive]} numberOfLines={1}>{label}</Text>
-        {count !== undefined && count > 0 && (
-          <View style={[chip.count, active && { backgroundColor: 'rgba(255,255,255,0.22)' }]}>
-            <Text style={[chip.countText, active && { color: '#FFFFFF' }]}>{count}</Text>
-          </View>
-        )}
-      </View>
-    </Press>
-  );
-}
-
-const chip = StyleSheet.create({
-  base: {
-    flexDirection: 'row', alignItems: 'center', gap: 6,
-    height: 38, paddingHorizontal: 15, borderRadius: theme.radius.pill,
-    backgroundColor: theme.color.raised, flexShrink: 0,
-    // A hairline rather than elevation. There can be fifteen of these in a
-    // horizontal scroller and at this size the border reads the same as the
-    // shadow did, for none of the cost.
-    borderWidth: 1, borderColor: theme.color.border,
-  },
-  active: { backgroundColor: theme.color.inverse, borderColor: theme.color.inverse },
-  label: { color: theme.color.inkSoft, fontSize: 13, fontWeight: '700', letterSpacing: -0.1 },
-  labelActive: { color: '#FFFFFF' },
-  count: {
-    minWidth: 19, height: 19, borderRadius: 10, paddingHorizontal: 5,
-    backgroundColor: theme.color.surfaceSecondary,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  countText: { color: theme.color.inkSoft, fontSize: 10.5, fontWeight: '800' },
-});
-
-/** Small status marker. Never interactive — that is what Chip is for. */
+/** Small status marker, never interactive — it labels, it is not a control. */
 export function Badge({
   label, tone = 'neutral', icon,
 }: {

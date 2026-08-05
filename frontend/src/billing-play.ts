@@ -204,7 +204,14 @@ export const playStore: Store = {
   },
 };
 
-/** Only for tests and teardown; the app holds the connection for its lifetime. */
+/**
+ * Releases the native connection and the two purchase listeners.
+ *
+ * Nothing calls this: the app holds the connection for its whole lifetime and
+ * the OS reclaims everything on exit. It stays because `listeners` is captured
+ * for exactly one purpose — being removable — and dropping this would leave
+ * handles nothing in the process could ever release.
+ */
 export async function disconnectPlay(): Promise<void> {
   listeners.forEach((l) => l.remove());
   listeners = [];
@@ -212,3 +219,4 @@ export async function disconnectPlay(): Promise<void> {
   pending = null;
   await endConnection().catch(() => {});
 }
+

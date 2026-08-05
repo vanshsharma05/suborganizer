@@ -120,8 +120,8 @@ export default function SubscriptionsScreen() {
       const todayISO = toISODate(new Date());
       sorted.sort(
         (a, b) =>
-          currentRenewal(a.next_renewal, a.billing_cycle, todayISO).localeCompare(
-            currentRenewal(b.next_renewal, b.billing_cycle, todayISO),
+          currentRenewal(a.next_renewal, a.billing_cycle, todayISO, a.anchor_day).localeCompare(
+            currentRenewal(b.next_renewal, b.billing_cycle, todayISO, b.anchor_day),
           ),
       );
     } else {
@@ -302,7 +302,7 @@ export default function SubscriptionsScreen() {
         // stutter and flash precisely while being scrolled, which is the one
         // moment it must not.
         renderItem={({ item }) => (
-          <Row sub={item} primary={primary} rate={rate} onPress={openSub} />
+          <Row sub={item} onPress={openSub} />
         )}
         ListEmptyComponent={
           // Placeholder rows while the first fetch is in flight. Showing "no
@@ -411,12 +411,16 @@ function CategorySheet({
   );
 }
 
+// Deliberately takes neither the primary currency nor the FX rate: a row shows
+// what the merchant actually charges, in the currency they charge it in. The
+// converted figures are the screen's job — the header total and the sort order —
+// because those are the only places where adding two currencies together means
+// anything. Keeping them out of the props also keeps the memo from re-rendering
+// every row each time the rate ticks.
 const Row = React.memo(function Row({
-  sub, primary, rate, onPress,
+  sub, onPress,
 }: {
   sub: Subscription;
-  primary: string;
-  rate: number;
   onPress: (id: string) => void;
 }) {
   /*
@@ -428,7 +432,12 @@ const Row = React.memo(function Row({
    * date beneath the name was simply wrong. The row that most needed attention
    * was the one that drew none.
    */
-  const renewal = currentRenewal(sub.next_renewal, sub.billing_cycle, toISODate(new Date()));
+  const renewal = currentRenewal(
+    sub.next_renewal,
+    sub.billing_cycle,
+    toISODate(new Date()),
+    sub.anchor_day,
+  );
   const days = differenceInCalendarDays(parseISO(renewal), new Date());
   const paused = sub.status !== 'active';
   const monthly = monthlyEquivalent(sub);

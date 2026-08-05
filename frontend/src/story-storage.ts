@@ -17,7 +17,7 @@ import { markPlayed, shouldPlayStory, type StoryState } from './story-gate';
 const KEY = 'story.lastShown.v1';
 
 /** Never throws — a storage failure must not keep anyone out of the app. */
-export async function readStoryState(): Promise<StoryState> {
+async function readStoryState(): Promise<StoryState> {
   try {
     return { lastShown: await AsyncStorage.getItem(KEY) };
   } catch {

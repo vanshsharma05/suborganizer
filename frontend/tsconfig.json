@@ -2,6 +2,14 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "strict": true,
+    // A prop that is passed and never read is usually not tidiness — it is a
+    // calculation that was meant to happen and does not. The subscriptions list
+    // took `anchor_day`'s sibling props this way and quietly showed a different
+    // renewal date from the reminder beside it. These three turn that into a
+    // build failure instead of something to notice by eye.
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
     "paths": {
       "@/*": [
         "./*"

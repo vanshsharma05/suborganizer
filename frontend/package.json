@@ -1,14 +1,16 @@
 {
   "name": "frontend",
   "main": "expo-router/entry",
-  "version": "1.1.0",
+  "version": "1.3.0",
   "scripts": {
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",
     "lint": "expo lint",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "check": "yarn typecheck && yarn lint && yarn test",
     "dev": "node ./scripts/dev.js"
   },
   "dependencies": {

@@ -201,7 +201,7 @@ export async function fetchHeaders(
 }
 
 /** Plain-text body for one message, used only when the amount is still unknown. */
-export async function fetchBodyText(token: string, id: string): Promise<string> {
+async function fetchBodyText(token: string, id: string): Promise<string> {
   try {
     const msg = await call<RawMessage>(`/messages/${id}`, token, { format: 'full' });
     const text = msg.payload ? extractText(msg.payload) : '';

@@ -267,7 +267,7 @@ export default function Dashboard() {
       // renewal left in the past cannot hold the front of the queue forever.
       .map((s) => ({
         sub: s,
-        renewal: currentRenewal(s.next_renewal, s.billing_cycle, todayISO),
+        renewal: currentRenewal(s.next_renewal, s.billing_cycle, todayISO, s.anchor_day),
       }))
       .sort((a, b) => a.renewal.localeCompare(b.renewal))
       .slice(0, 8);

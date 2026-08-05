@@ -60,7 +60,7 @@ export default function CalendarScreen() {
       .filter((x) => x.status === 'active')
       .map((sub) => ({
         sub,
-        renewal: currentRenewal(sub.next_renewal, sub.billing_cycle, todayISO),
+        renewal: currentRenewal(sub.next_renewal, sub.billing_cycle, todayISO, sub.anchor_day),
       }))
       .sort((a, b) => a.renewal.localeCompare(b.renewal));
   }, [subs]);

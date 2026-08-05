@@ -1,7 +1,12 @@
 import { greetingName } from './apple';
 import { advanceRenewal, anchorDayOf, currentRenewal } from './cycles';
+import type { Database } from './database.types';
 import { addDaysISO, daysUntilISO, toISODate } from './dates';
 import { describeError, supabase } from './supabase';
+
+/** What the table itself accepts, as opposed to what callers hand us. */
+type SubInsert = Database['public']['Tables']['subscriptions']['Insert'];
+type SubUpdate = Database['public']['Tables']['subscriptions']['Update'];
 
 // Re-exported because callers reach for it alongside the queries here, but it
 // lives in cycles.ts so it can be unit-tested without a Supabase client.
@@ -171,10 +176,6 @@ export async function setProFlag(is_pro: boolean): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
-export async function upgradeToPro(): Promise<void> {
-  return setProFlag(true);
-}
-
 // ------------------------------------------------------------ subscriptions --
 // No user_id filter is needed on reads: the RLS policies in
 // supabase/schema.sql scope every row to auth.uid() inside Postgres.
@@ -188,52 +189,6 @@ export async function listSubscriptions(): Promise<Subscription[]> {
   return (data ?? []).map(toSub);
 }
 
-export async function createSubscription(input: SubscriptionInput): Promise<Subscription> {
-  const user_id = await currentUserId();
-
-  // user_id must be set explicitly — the INSERT policy checks it matches
-  // auth.uid(), and the column has no default.
-  // The date they picked is the billing day, by definition.
-  const anchor = input.anchor_day ?? anchorDayOf(input.next_renewal);
-
-  const attempt = (extras: LateColumns) =>
-    supabase
-      .from('subscriptions')
-      .insert({ ...input, ...extras, user_id })
-      .select('*')
-      .single();
-
-  let res = await attempt({ anchor_day: anchor, payment_method: input.payment_method });
-  // `undefined` is dropped by JSON.stringify, so the retry sends no such key at
-  // all rather than sending null into a column that is not there.
-  if (missingLateColumn(res.error)) res = await attempt(DROP_LATE_COLUMNS);
-
-  if (res.error) throw new Error(res.error.message);
-  return toSub(res.data);
-}
-
-export async function updateSubscription(
-  id: string,
-  input: SubscriptionInput,
-): Promise<Subscription> {
-  const attempt = (extras: LateColumns) =>
-    supabase
-      .from('subscriptions')
-      .update({ ...input, ...extras })
-      .eq('id', id)
-      .select('*')
-      .single();
-
-  let res = await attempt({
-    anchor_day: input.anchor_day,
-    payment_method: input.payment_method,
-  });
-  if (missingLateColumn(res.error)) res = await attempt(DROP_LATE_COLUMNS);
-
-  if (res.error) throw new Error(res.error.message);
-  return toSub(res.data);
-}
-
 /**
  * Columns added after the first release, whose migrations are run by hand.
  *
@@ -243,18 +198,7 @@ export async function updateSubscription(
  * database — add a subscription — would fail outright, which is a far worse
  * failure than the things these columns fix.
  */
-type LateColumns = {
-  anchor_day?: number | null;
-  payment_method?: string | null;
-};
-
-/** Sends neither key at all; `undefined` is dropped by JSON.stringify. */
-const DROP_LATE_COLUMNS: LateColumns = {
-  anchor_day: undefined,
-  payment_method: undefined,
-};
-
-const LATE_COLUMN_NAMES = ['anchor_day', 'payment_method'];
+const LATE_COLUMNS = ['anchor_day', 'payment_method'] as const;
 
 /** Whether the database is telling us one of those columns is not there. */
 function missingLateColumn(error: { code?: string; message?: string } | null): boolean {
@@ -264,9 +208,70 @@ function missingLateColumn(error: { code?: string; message?: string } | null): b
   // client. The message check is the backstop for either wording changing.
   if (error.code === '42703' || error.code === 'PGRST204') return true;
   return (
-    typeof error.message === 'string' &&
-    LATE_COLUMN_NAMES.some((c) => error.message?.includes(c))
+    typeof error.message === 'string' && LATE_COLUMNS.some((c) => error.message?.includes(c))
   );
+}
+
+/**
+ * The same body with those columns dropped outright, for the second attempt.
+ *
+ * Removed rather than set to `undefined`: both end up sending no such key, but
+ * only one of them says so without the reader having to know that JSON.stringify
+ * discards undefined values.
+ */
+function withoutLateColumns<T extends object>(body: T): T {
+  const copy = { ...body };
+  for (const name of LATE_COLUMNS) delete (copy as Record<string, unknown>)[name];
+  return copy;
+}
+
+/**
+ * Every subscription write goes through insertSub or updateSub, so the retry
+ * above is not something each call site has to remember.
+ *
+ * patchSubscription used to do its own update and so had no retry — meaning a
+ * Gmail reconcile writing payment_method failed on a database missing that
+ * column, while the edit form writing the very same column succeeded.
+ */
+async function insertSub(body: SubInsert): Promise<Subscription> {
+  const send = (b: SubInsert) => supabase.from('subscriptions').insert(b).select('*').single();
+
+  let res = await send(body);
+  if (missingLateColumn(res.error)) res = await send(withoutLateColumns(body));
+
+  if (res.error) throw new Error(res.error.message);
+  return toSub(res.data);
+}
+
+async function updateSub(id: string, patch: SubUpdate): Promise<Subscription> {
+  const send = (p: SubUpdate) =>
+    supabase.from('subscriptions').update(p).eq('id', id).select('*').single();
+
+  let res = await send(patch);
+  if (missingLateColumn(res.error)) res = await send(withoutLateColumns(patch));
+
+  if (res.error) throw new Error(res.error.message);
+  return toSub(res.data);
+}
+
+export async function createSubscription(input: SubscriptionInput): Promise<Subscription> {
+  // user_id must be set explicitly — the INSERT policy checks it matches
+  // auth.uid(), and the column has no default.
+  const user_id = await currentUserId();
+
+  return insertSub({
+    ...input,
+    user_id,
+    // The date they picked is the billing day, by definition.
+    anchor_day: input.anchor_day ?? anchorDayOf(input.next_renewal),
+  });
+}
+
+export async function updateSubscription(
+  id: string,
+  input: SubscriptionInput,
+): Promise<Subscription> {
+  return updateSub(id, input);
 }
 
 /** Update only the named columns — used by the Gmail scan to reconcile drift. */
@@ -274,14 +279,7 @@ export async function patchSubscription(
   id: string,
   patch: Partial<SubscriptionInput>,
 ): Promise<Subscription> {
-  const { data, error } = await supabase
-    .from('subscriptions')
-    .update(patch)
-    .eq('id', id)
-    .select('*')
-    .single();
-  if (error) throw new Error(error.message);
-  return toSub(data);
+  return updateSub(id, patch);
 }
 
 export async function deleteSubscription(id: string): Promise<void> {
@@ -290,67 +288,34 @@ export async function deleteSubscription(id: string): Promise<void> {
 }
 
 export async function toggleSubscription(id: string, current: string): Promise<Subscription> {
-  const { data, error } = await supabase
-    .from('subscriptions')
-    .update({ status: current === 'active' ? 'paused' : 'active' })
-    .eq('id', id)
-    .select('*')
-    .single();
-  if (error) throw new Error(error.message);
-  return toSub(data);
+  return updateSub(id, { status: current === 'active' ? 'paused' : 'active' });
 }
 
 export async function cancelSubscription(id: string): Promise<Subscription> {
-  const { data, error } = await supabase
-    .from('subscriptions')
-    .update({ status: 'cancelled' })
-    .eq('id', id)
-    .select('*')
-    .single();
-  if (error) throw new Error(error.message);
-  return toSub(data);
+  return updateSub(id, { status: 'cancelled' });
 }
 
 export async function snoozeSubscription(id: string, days: number): Promise<Subscription> {
-  const { data, error } = await supabase
-    .from('subscriptions')
-    .update({ snoozed_until: addDaysISO(new Date(), Math.max(1, days)) })
-    .eq('id', id)
-    .select('*')
-    .single();
-  if (error) throw new Error(error.message);
-  return toSub(data);
+  return updateSub(id, { snoozed_until: addDaysISO(new Date(), Math.max(1, days)) });
 }
 
 export async function keepSubscription(sub: Subscription): Promise<Subscription> {
-  const { data, error } = await supabase
-    .from('subscriptions')
-    .update({
-      // Rolled to the present before being advanced. Advancing the stored date
-      // alone moved a three-month-stale subscription to two months stale, so
-      // the reminder came straight back and "Keep it" looked like a dead button.
-      // The anchor is what stops this drifting. Advancing from the stored date
-      // alone loses the billing day the first time it crosses a February: 31
-      // January is stored as 28 February, the next advance gives 28 March, and
-      // every renewal after that is three days early forever. Passing the
-      // anchor through both steps keeps 31 -> 28 Feb -> 31 Mar.
-      next_renewal: advanceRenewal(
-        currentRenewal(
-          sub.next_renewal,
-          sub.billing_cycle,
-          toISODate(new Date()),
-          sub.anchor_day,
-        ),
-        sub.billing_cycle,
-        sub.anchor_day,
-      ),
-      snoozed_until: null,
-    })
-    .eq('id', sub.id)
-    .select('*')
-    .single();
-  if (error) throw new Error(error.message);
-  return toSub(data);
+  return updateSub(sub.id, {
+    // Rolled to the present before being advanced. Advancing the stored date
+    // alone moved a three-month-stale subscription to two months stale, so
+    // the reminder came straight back and "Keep it" looked like a dead button.
+    // The anchor is what stops this drifting. Advancing from the stored date
+    // alone loses the billing day the first time it crosses a February: 31
+    // January is stored as 28 February, the next advance gives 28 March, and
+    // every renewal after that is three days early forever. Passing the
+    // anchor through both steps keeps 31 -> 28 Feb -> 31 Mar.
+    next_renewal: advanceRenewal(
+      currentRenewal(sub.next_renewal, sub.billing_cycle, toISODate(new Date()), sub.anchor_day),
+      sub.billing_cycle,
+      sub.anchor_day,
+    ),
+    snoozed_until: null,
+  });
 }
 
 // ------------------------------------------------------------ price changes --

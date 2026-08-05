@@ -35,7 +35,7 @@ function noteFor(candidate: Candidate): string {
   return lines.join('\n');
 }
 
-export function toSubscriptionInput(candidate: Candidate): SubscriptionInput {
+function toSubscriptionInput(candidate: Candidate): SubscriptionInput {
   return {
     name: candidate.name,
     // A candidate with no amount is still worth tracking; 0 makes it obvious

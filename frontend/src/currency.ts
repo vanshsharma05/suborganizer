@@ -18,7 +18,7 @@ import { useEffect, useState } from 'react';
 export const CURRENCIES = ['INR', 'USD'] as const;
 export type Currency = (typeof CURRENCIES)[number];
 
-export const CURRENCY_SYMBOL: Record<string, string> = { INR: '₹', USD: '$' };
+const CURRENCY_SYMBOL: Record<string, string> = { INR: '₹', USD: '$' };
 
 /**
  * Used until the live rate arrives, and when the device is offline with nothing
@@ -62,19 +62,9 @@ function isSane(rate: unknown): rate is number {
   return typeof rate === 'number' && Number.isFinite(rate) && rate > 20 && rate < 500;
 }
 
-/** 1 USD expressed in INR, as last known. */
-export function usdInr(): number {
-  return current;
-}
-
 /** Milliseconds since the live rate was fetched; Infinity when never. */
-export function rateAge(): number {
+function rateAge(): number {
   return fetchedAt ? Date.now() - fetchedAt : Infinity;
-}
-
-/** True once a real rate has been obtained, rather than the fallback. */
-export function hasLiveRate(): boolean {
-  return fetchedAt > 0;
 }
 
 async function hydrateFromCache(): Promise<void> {
@@ -95,7 +85,7 @@ async function hydrateFromCache(): Promise<void> {
 }
 
 /** Fetches a fresh rate, writes it through to storage and notifies listeners. */
-export async function refreshRate(): Promise<number> {
+async function refreshRate(): Promise<number> {
   if (inflight) return inflight;
 
   inflight = (async () => {
@@ -131,7 +121,7 @@ export async function refreshRate(): Promise<number> {
 }
 
 /** Loads the cached rate, then refreshes it if it is missing or stale. */
-export async function ensureRate(): Promise<number> {
+async function ensureRate(): Promise<number> {
   await hydrateFromCache();
   if (rateAge() > MAX_AGE_MS) return refreshRate();
   return current;
