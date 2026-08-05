@@ -16,8 +16,9 @@
 import { Subscription } from '../api';
 import { advanceRenewal } from '../cycles';
 import { toISODate, todayISO } from '../dates';
-import { getGmailAccessToken } from './auth';
+import { accessTokenFor, listMailboxes } from './auth';
 import { fetchBodies, fetchHeaders, GmailHeaders, searchMessageIds } from './client';
+import { detectPaymentMethod, type PaymentMethod } from './payment-method';
 import {
   classify,
   Cycle,
@@ -72,6 +73,10 @@ export type ScanEvent = {
   money?: Money;
   /** The mail said outright that the charge repeats (subject or snippet). */
   recurring: boolean;
+  /** How the money left, when the mail says. See payment-method.ts. */
+  payment?: PaymentMethod;
+  /** Which connected inbox this came from, for the "found in" line. */
+  mailbox?: string;
 };
 
 export type Candidate = {
@@ -101,6 +106,16 @@ export type Candidate = {
   reasons: string[];
   events: ScanEvent[];
 
+  /**
+   * How this is paid for, from the most recent receipt that said.
+   *
+   * Taken from the newest rather than merged across all of them, because people
+   * change card and the current one is the answer to "what do I cancel".
+   */
+  payment?: PaymentMethod;
+  /** Which connected inboxes this was found in — often more than one. */
+  mailboxes: string[];
+
   /** Set when this merchant is already in the user's subscription list. */
   existingId?: string;
   existingStatus?: Subscription['status'];
@@ -112,6 +127,10 @@ export type ScanProgress = {
   stage: 'searching' | 'reading' | 'details' | 'resolving';
   done: number;
   total: number;
+  /** Which inbox is being read, and where it sits in the queue. */
+  mailbox?: string;
+  mailboxIndex?: number;
+  mailboxCount?: number;
 };
 
 export type ScanResult = {
@@ -119,6 +138,16 @@ export type ScanResult = {
   messagesScanned: number;
   eventsFound: number;
   scannedAt: number;
+  /** Addresses that were read successfully. */
+  mailboxesScanned: string[];
+  /**
+   * Inboxes that could not be read, with why.
+   *
+   * A revoked grant on one address must not sink the whole scan — the other
+   * inboxes still hold real subscriptions, and reporting nothing because one
+   * connection lapsed is the least useful thing the scan could do.
+   */
+  mailboxesFailed: { email: string; reason: string }[];
 };
 
 export type ScanOptions = {
@@ -164,41 +193,93 @@ export async function scanGmail(options: ScanOptions = {}): Promise<ScanResult> 
   const { depth = 'quick', existing = [], onProgress, signal } = options;
   const plan = DEPTHS[depth];
 
-  const token = await getGmailAccessToken();
-  if (!token) throw new Error('Gmail is not connected');
+  const mailboxes = await listMailboxes();
+  if (mailboxes.length === 0) throw new Error('Gmail is not connected');
 
   const abortIfCancelled = () => {
     if (signal?.cancelled) throw new ScanCancelled();
   };
 
-  // 1. search
-  onProgress?.({ stage: 'searching', done: 0, total: plan.max });
-  const ids = await searchMessageIds(token, buildQuery(plan.window), plan.max, (found) => {
-    onProgress?.({ stage: 'searching', done: found, total: plan.max });
-  });
-  abortIfCancelled();
-
-  // 2. headers
-  onProgress?.({ stage: 'reading', done: 0, total: ids.length });
-  const messages = await fetchHeaders(token, ids, (done) => {
-    onProgress?.({ stage: 'reading', done, total: ids.length });
-  });
-  abortIfCancelled();
-
-  // 3. classify
+  /*
+   * One group map across every inbox.
+   *
+   * This is what makes multiple mailboxes actually work rather than merely run
+   * twice. A subscription whose receipts arrive at the work address and whose
+   * cancellation went to the personal one is a single subscription, and only a
+   * shared map lets the timeline replay see both halves. Scanning separately
+   * and concatenating would report it twice, once active and once cancelled,
+   * and both would be wrong.
+   */
   const groups = new Map<string, GroupDraft>();
-  for (const msg of messages) collectEvent(msg, groups);
+  const mailboxesScanned: string[] = [];
+  const mailboxesFailed: { email: string; reason: string }[] = [];
+  let messagesScanned = 0;
 
-  // 4. fill in missing amounts from message bodies
-  const needBody = pickMessagesNeedingBody(groups, plan.bodies);
-  if (needBody.length) {
-    onProgress?.({ stage: 'details', done: 0, total: needBody.length });
-    const bodies = await fetchBodies(token, needBody, (done) => {
-      onProgress?.({ stage: 'details', done, total: needBody.length });
-    });
-    applyBodyAmounts(groups, bodies);
+  for (const [index, mailbox] of mailboxes.entries()) {
+    const label = mailbox.email ?? 'inbox';
+    const where = { mailbox: label, mailboxIndex: index + 1, mailboxCount: mailboxes.length };
+
+    let token: string;
+    try {
+      token = await accessTokenFor(mailbox);
+    } catch (e) {
+      // One lapsed grant must not sink the scan. The other inboxes still hold
+      // real subscriptions, and returning nothing because one connection
+      // expired is the least useful thing this could do.
+      mailboxesFailed.push({
+        email: label,
+        reason: e instanceof Error ? e.message : 'Could not read this inbox.',
+      });
+      continue;
+    }
+
+    try {
+      // 1. search
+      onProgress?.({ stage: 'searching', done: 0, total: plan.max, ...where });
+      const ids = await searchMessageIds(token, buildQuery(plan.window), plan.max, (found) => {
+        onProgress?.({ stage: 'searching', done: found, total: plan.max, ...where });
+      });
+      abortIfCancelled();
+
+      // 2. headers
+      onProgress?.({ stage: 'reading', done: 0, total: ids.length, ...where });
+      const messages = await fetchHeaders(token, ids, (done) => {
+        onProgress?.({ stage: 'reading', done, total: ids.length, ...where });
+      });
+      abortIfCancelled();
+      messagesScanned += messages.length;
+
+      // 3. classify into the shared map
+      for (const msg of messages) collectEvent(msg, groups, label);
+
+      // 4. fill in missing amounts and payment methods from message bodies
+      const needBody = pickMessagesNeedingBody(groups, plan.bodies, ids);
+      if (needBody.length) {
+        onProgress?.({ stage: 'details', done: 0, total: needBody.length, ...where });
+        const bodies = await fetchBodies(token, needBody, (done) => {
+          onProgress?.({ stage: 'details', done, total: needBody.length, ...where });
+        });
+        applyBodyDetails(groups, bodies);
+      }
+      abortIfCancelled();
+
+      mailboxesScanned.push(label);
+    } catch (e) {
+      if (e instanceof ScanCancelled) throw e;
+      mailboxesFailed.push({
+        email: label,
+        reason: e instanceof Error ? e.message : 'Could not read this inbox.',
+      });
+    }
   }
-  abortIfCancelled();
+
+  // Every inbox failed — that is a failure, not an empty result. Saying "no
+  // subscriptions found" when nothing could be read is a lie about their money.
+  if (mailboxesScanned.length === 0) {
+    throw new Error(
+      mailboxesFailed[0]?.reason ?? 'None of your connected inboxes could be read.',
+    );
+  }
 
   // 5. resolve
   onProgress?.({ stage: 'resolving', done: 0, total: groups.size });
@@ -220,9 +301,11 @@ export async function scanGmail(options: ScanOptions = {}): Promise<ScanResult> 
 
   return {
     candidates,
-    messagesScanned: messages.length,
+    messagesScanned,
     eventsFound: candidates.reduce((n, c) => n + c.events.length, 0),
     scannedAt: Date.now(),
+    mailboxesScanned,
+    mailboxesFailed,
   };
 }
 
@@ -244,7 +327,11 @@ export type GroupDraft = {
   events: ScanEvent[];
 };
 
-function collectEvent(msg: GmailHeaders, groups: Map<string, GroupDraft>): void {
+function collectEvent(
+  msg: GmailHeaders,
+  groups: Map<string, GroupDraft>,
+  mailbox?: string,
+): void {
   const sender = parseSender(msg.from);
   if (!sender.domain) return;
 
@@ -324,6 +411,10 @@ function collectEvent(msg: GmailHeaders, groups: Map<string, GroupDraft>): void 
     // Judged on the snippet too, not just the subject: "Your receipt" says
     // nothing, while the body under it says "monthly plan".
     recurring: RECURRING_WORDS.test(haystack),
+    // The snippet occasionally carries it ("Paid with Visa ···· 4242"); the
+    // body pass fills in the rest.
+    payment: detectPaymentMethod(haystack) ?? undefined,
+    mailbox,
   });
 
   groups.set(key, group);
@@ -331,17 +422,28 @@ function collectEvent(msg: GmailHeaders, groups: Map<string, GroupDraft>): void 
 
 /**
  * Bodies are fetched only where they can change the outcome: a merchant with a
- * charge but no price yet. Everything else would be bandwidth spent to learn
- * nothing.
+ * charge but no price yet, or none whose payment method is known. Everything
+ * else would be bandwidth spent to learn nothing.
+ *
+ * `available` is the id list for the inbox currently being read. Groups now
+ * span several inboxes, so without it this would ask one mailbox for messages
+ * that live in another — every one a wasted request and a 404.
  */
-function pickMessagesNeedingBody(groups: Map<string, GroupDraft>, limit: number): string[] {
+function pickMessagesNeedingBody(
+  groups: Map<string, GroupDraft>,
+  limit: number,
+  available: readonly string[],
+): string[] {
+  const here = new Set(available);
   const wanted: { id: string; date: number }[] = [];
 
   for (const group of groups.values()) {
-    if (group.events.some((e) => e.money)) continue;
+    const pricedAlready = group.events.some((e) => e.money);
+    const paymentKnown = group.events.some((e) => e.payment);
+    if (pricedAlready && paymentKnown) continue;
 
     const payments = group.events
-      .filter((e) => e.kind === 'charge' || e.kind === 'start')
+      .filter((e) => (e.kind === 'charge' || e.kind === 'start') && here.has(e.messageId))
       .sort((a, b) => b.date - a.date);
 
     // The two most recent are enough to price the plan.
@@ -354,12 +456,20 @@ function pickMessagesNeedingBody(groups: Map<string, GroupDraft>, limit: number)
     .map((w) => w.id);
 }
 
-function applyBodyAmounts(groups: Map<string, GroupDraft>, bodies: Map<string, string>): void {
+/**
+ * Reads what the headers could not: the amount, and how it was paid.
+ *
+ * The payment method almost always lives in the body rather than the subject —
+ * "Visa ···· 4242" is not something a sender puts in a subject line — which is
+ * why this pass exists at all for it.
+ */
+function applyBodyDetails(groups: Map<string, GroupDraft>, bodies: Map<string, string>): void {
   for (const group of groups.values()) {
     for (const event of group.events) {
-      if (event.money) continue;
       const body = bodies.get(event.messageId);
-      if (body) event.money = extractMoney(body);
+      if (!body) continue;
+      if (!event.money) event.money = extractMoney(body);
+      if (!event.payment) event.payment = detectPaymentMethod(body) ?? undefined;
     }
   }
 }
@@ -511,6 +621,14 @@ export function resolveGroup(group: GroupDraft): Candidate | null {
     confidence,
     reasons,
     events: events.reverse(), // newest first reads better in the UI
+
+    // The newest receipt that named an instrument wins. People change card, and
+    // the current one is the answer to "what do I cancel" — an older mention is
+    // history, not an instruction. `events` is newest-first by this point.
+    payment: events.find((e) => e.payment)?.payment,
+    // Every inbox this merchant turned up in, deduplicated and in the order the
+    // mailboxes were read.
+    mailboxes: [...new Set(events.map((e) => e.mailbox).filter((m): m is string => Boolean(m)))],
   };
 }
 

@@ -12,11 +12,14 @@
  * can still connect Gmail, and disconnecting Gmail does not log them out.
  */
 
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as AuthSession from 'expo-auth-session';
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 import { supabase } from '../supabase';
+import {
+  addMailbox, forUser, mailboxId, needsRefresh, readMailboxes, removeMailbox,
+  updateTokens, writeMailboxes, type Mailbox,
+} from './mailboxes';
 
 // gmail.readonly is a *restricted* scope: Google requires app verification (and
 // a CASA security assessment) before it works for users outside the test list
@@ -32,20 +35,15 @@ const DISCOVERY: AuthSession.DiscoveryDocument = {
   revocationEndpoint: 'https://oauth2.googleapis.com/revoke',
 };
 
-const STORE_KEY = 'gmail.connection.v1';
-
-/** Refresh a little early so a scan never starts on a token about to expire. */
-const EXPIRY_SKEW_MS = 120_000;
-
-export type GmailConnection = {
-  /** Supabase user this grant belongs to — guards against a shared device. */
-  userId: string;
-  email?: string;
-  accessToken: string;
-  refreshToken?: string;
-  /** Epoch ms. */
-  expiresAt: number;
-};
+/**
+ * One grant per inbox, kept in a list.
+ *
+ * Work receipts land in the work address and personal ones in the personal
+ * address, so reading a single mailbox reports a total that is confidently
+ * wrong — and wrong by omitting exactly the subscriptions the user had already
+ * forgotten. See mailboxes.ts for the store itself.
+ */
+export type { Mailbox } from './mailboxes';
 
 /** Thrown when the grant is gone or rejected; the UI should offer to reconnect. */
 export class GmailAuthError extends Error {
@@ -133,37 +131,23 @@ function redirectUri(id: string): string {
 
 // ------------------------------------------------------------------- store --
 
-async function readStore(): Promise<GmailConnection | null> {
-  const raw = await AsyncStorage.getItem(STORE_KEY);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as GmailConnection;
-  } catch {
-    await AsyncStorage.removeItem(STORE_KEY);
-    return null;
-  }
-}
-
-async function writeStore(conn: GmailConnection): Promise<void> {
-  await AsyncStorage.setItem(STORE_KEY, JSON.stringify(conn));
-}
-
 async function currentUserId(): Promise<string> {
   const { data } = await supabase.auth.getUser();
   if (!data.user) throw new GmailAuthError('Not signed in');
   return data.user.id;
 }
 
-/** The stored grant for the signed-in user, or null. Does not hit the network. */
-export async function getGmailConnection(): Promise<GmailConnection | null> {
-  const conn = await readStore();
-  if (!conn) return null;
-
+/**
+ * Every inbox the signed-in user has connected, oldest first. No network.
+ *
+ * Empty when nobody is signed in, and empty rather than throwing when the
+ * device still holds a previous account's grants — `forUser` is the single
+ * place that decision is made.
+ */
+export async function listMailboxes(): Promise<Mailbox[]> {
   const { data } = await supabase.auth.getUser();
-  // A grant left behind by a previous account must never be reused.
-  if (!data.user || data.user.id !== conn.userId) return null;
-
-  return conn;
+  if (!data.user) return [];
+  return forUser(await readMailboxes(), data.user.id);
 }
 
 // ------------------------------------------------------------------- flows --
@@ -182,8 +166,16 @@ async function fetchMailboxAddress(accessToken: string): Promise<string | undefi
   }
 }
 
-/** Runs Google consent and stores the resulting grant. */
-export async function connectGmail(): Promise<GmailConnection> {
+/**
+ * Runs Google consent and stores the resulting grant.
+ *
+ * Called once per inbox. Connecting a second address is the same flow — what
+ * makes it possible is `select_account` in the prompt: without it Google
+ * silently reuses whichever account the browser is already signed into, and a
+ * user trying to add their work address would connect their personal one again
+ * and be told it is already connected.
+ */
+export async function connectMailbox(): Promise<Mailbox> {
   const id = clientId();
   const redirect = redirectUri(id);
 
@@ -194,10 +186,11 @@ export async function connectGmail(): Promise<GmailConnection> {
     responseType: AuthSession.ResponseType.Code,
     usePKCE: true,
     extraParams: {
-      // Without both of these Google returns an access token only, and the user
-      // would have to re-consent for every scan once the hour is up.
+      // `offline` and `consent` together are what produce a refresh token —
+      // without them Google returns an access token only, and the user
+      // re-consents every hour. `select_account` is what allows a second inbox.
       access_type: 'offline',
-      prompt: 'consent',
+      prompt: 'consent select_account',
     },
   });
 
@@ -231,16 +224,23 @@ export async function connectGmail(): Promise<GmailConnection> {
     );
   }
 
-  const conn: GmailConnection = {
+  const email = await fetchMailboxAddress(token.accessToken);
+  const now = Date.now();
+
+  const mailbox: Mailbox = {
+    // Identified by address, so reconnecting the same inbox updates the grant
+    // rather than adding a second copy of it.
+    id: mailboxId(email, `mailbox-${now}`),
+    email,
     userId: await currentUserId(),
     accessToken: token.accessToken,
     refreshToken: token.refreshToken,
-    expiresAt: Date.now() + (token.expiresIn ?? 3600) * 1000,
-    email: await fetchMailboxAddress(token.accessToken),
+    expiresAt: now + (token.expiresIn ?? 3600) * 1000,
+    connectedAt: now,
   };
 
-  await writeStore(conn);
-  return conn;
+  await writeMailboxes(addMailbox(await readMailboxes(), mailbox));
+  return mailbox;
 }
 
 /**
@@ -249,53 +249,73 @@ export async function connectGmail(): Promise<GmailConnection> {
  * Returns null rather than throwing when there is simply no grant yet, so the
  * caller can distinguish "never connected" from "connection broke".
  */
-export async function getGmailAccessToken(): Promise<string | null> {
-  const conn = await getGmailConnection();
-  if (!conn) return null;
+export async function accessTokenFor(mailbox: Mailbox): Promise<string> {
+  if (!needsRefresh(mailbox)) return mailbox.accessToken;
 
-  if (conn.expiresAt - EXPIRY_SKEW_MS > Date.now()) return conn.accessToken;
-
-  if (!conn.refreshToken) {
+  if (!mailbox.refreshToken) {
     // Google withholds the refresh token when consent was already granted and
     // the request did not force it. Reconnecting (prompt=consent) fixes it.
-    await disconnectGmail();
-    throw new GmailAuthError('Gmail access expired. Connect again to scan.');
+    await disconnectMailbox(mailbox.id);
+    throw new GmailAuthError(
+      `Access to ${mailbox.email ?? 'that inbox'} expired. Connect it again to scan.`,
+    );
   }
 
   try {
     const refreshed = await AuthSession.refreshAsync(
-      { clientId: clientId(), refreshToken: conn.refreshToken, scopes: GMAIL_SCOPES },
+      { clientId: clientId(), refreshToken: mailbox.refreshToken, scopes: GMAIL_SCOPES },
       DISCOVERY,
     );
 
-    const next: GmailConnection = {
-      ...conn,
-      accessToken: refreshed.accessToken,
-      // Google usually omits refresh_token on refresh; keep the original.
-      refreshToken: refreshed.refreshToken ?? conn.refreshToken,
-      expiresAt: Date.now() + (refreshed.expiresIn ?? 3600) * 1000,
-    };
-    await writeStore(next);
-    return next.accessToken;
+    const expiresAt = Date.now() + (refreshed.expiresIn ?? 3600) * 1000;
+    await writeMailboxes(
+      updateTokens(await readMailboxes(), mailbox.id, {
+        accessToken: refreshed.accessToken,
+        refreshToken: refreshed.refreshToken,
+        expiresAt,
+      }),
+    );
+    return refreshed.accessToken;
   } catch {
-    // Revoked in the Google account, or the refresh token aged out.
-    await disconnectGmail();
-    throw new GmailAuthError('Gmail access was revoked. Connect again to scan.');
+    // Revoked in the Google account, or the refresh token aged out. Drop this
+    // inbox only — the others are unaffected and their scans should still run.
+    await disconnectMailbox(mailbox.id);
+    throw new GmailAuthError(
+      `Access to ${mailbox.email ?? 'that inbox'} was revoked. Connect it again to scan.`,
+    );
   }
 }
 
-/** Revokes the grant with Google (best effort) and forgets it locally. */
-export async function disconnectGmail(): Promise<void> {
-  const conn = await readStore();
-  await AsyncStorage.removeItem(STORE_KEY);
-  if (!conn) return;
-
+/** Best-effort revoke with Google. Failure is not worth telling anyone about. */
+async function revoke(mailbox: Mailbox): Promise<void> {
   try {
-    await fetch(`https://oauth2.googleapis.com/revoke?token=${conn.refreshToken ?? conn.accessToken}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    });
+    await fetch(
+      `https://oauth2.googleapis.com/revoke?token=${mailbox.refreshToken ?? mailbox.accessToken}`,
+      { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
+    );
   } catch {
     // Offline: the local copy is gone, which is what matters for this device.
   }
+}
+
+/** Forgets one inbox and revokes its grant. The others are untouched. */
+export async function disconnectMailbox(id: string): Promise<void> {
+  const all = await readMailboxes();
+  const gone = all.find((m) => m.id === id);
+  await writeMailboxes(removeMailbox(all, id));
+  if (gone) await revoke(gone);
+}
+
+/**
+ * Forgets every inbox on this device.
+ *
+ * Called on sign-out. Leaving grants that can read somebody's mail on a
+ * signed-out device is not a trade worth making for convenience — including
+ * grants belonging to a different account, which is why this clears the lot
+ * rather than only the current user's.
+ */
+export async function disconnectGmail(): Promise<void> {
+  const all = await readMailboxes();
+  await writeMailboxes([]);
+  for (const m of all) await revoke(m);
 }

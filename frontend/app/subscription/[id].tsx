@@ -42,8 +42,24 @@ import { CURRENCIES, fmtMoney, symbolFor } from '@/src/currency';
 import { anchorDayOf, monthlyEquivalent } from '@/src/cycles';
 import { addDaysISO, parseISODate, toISODate } from '@/src/dates';
 import { chargeDates, spentSince, trackedDays } from '@/src/spend-history';
+import {
+  cancelledAtStore, describePaymentMethod, unpackPaymentMethod, type PaymentKind,
+} from '@/src/gmail';
 
 type Cycle = 'weekly' | 'monthly' | 'yearly';
+
+/** One glyph per instrument, so the row reads before the text does. */
+function payIcon(kind: PaymentKind): keyof typeof Ionicons.glyphMap {
+  switch (kind) {
+    case 'card': return 'card-outline';
+    case 'upi': return 'phone-portrait-outline';
+    case 'netbanking': return 'business-outline';
+    case 'wallet': return 'wallet-outline';
+    case 'appstore': return 'logo-apple';
+    case 'playstore': return 'logo-google-playstore';
+    case 'paypal': return 'logo-paypal';
+  }
+}
 
 /** A `YYYY-MM-DD` column rendered for display, tolerating a malformed value. */
 function prettyDate(iso: string): string {
@@ -228,6 +244,17 @@ function Form({
    * day nothing recorded, so there is no honest figure to show. See
    * src/spend-history.ts.
    */
+  /**
+   * What the scan learned about how this is paid for.
+   *
+   * From the stored row, not the form: nobody types this, so there is nothing
+   * being edited that it should reflect.
+   */
+  const payment = useMemo(
+    () => unpackPaymentMethod(existing?.payment_method),
+    [existing?.payment_method],
+  );
+
   const paid = useMemo(() => {
     if (!existing) return null;
 
@@ -430,6 +457,30 @@ function Form({
                   {' since you added this — '}
                   {paid.charges} {paid.charges === 1 ? 'charge' : 'charges'}
                   {paid.days >= 30 && ` over ${Math.round(paid.days / 30)} months`}
+                </Text>
+              </View>
+            </Reveal>
+          )}
+
+          {/* How the money leaves.
+              Read-only and only shown when a receipt actually said so — this is
+              something the scan learned, not a field anyone fills in, and an
+              empty row inviting input would be a promise the app cannot keep.
+              The store case earns its own line because it changes what
+              cancelling even means: an App Store subscription cannot be stopped
+              on the merchant's website at all. */}
+          {payment !== null && (
+            <Reveal delay={90}>
+              <View style={s.paid} testID="form-payment">
+                <Ionicons name={payIcon(payment.kind)} size={15} color={theme.color.inkMuted} />
+                <Text style={s.paidText}>
+                  <Text style={s.paidAmount}>{describePaymentMethod(payment)}</Text>
+                  {payment.autopay && ' · renews automatically'}
+                  {cancelledAtStore(payment) && (
+                    <Text style={s.payStore}>
+                      {`\nCancel this in ${payment.kind === 'appstore' ? 'the App Store' : 'Google Play'}, not on their website.`}
+                    </Text>
+                  )}
                 </Text>
               </View>
             </Reveal>
@@ -667,6 +718,7 @@ const s = StyleSheet.create({
   },
   paidText: { flex: 1, ...theme.type.caption, color: theme.color.inkMuted },
   paidAmount: { fontWeight: '800', color: theme.color.inkSoft },
+  payStore: { color: theme.color.brandSecondary, fontWeight: '700' },
 
   label: { ...theme.type.overline, color: theme.color.inkMuted, marginTop: 26, marginBottom: 10 },
 

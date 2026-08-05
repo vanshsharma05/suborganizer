@@ -13,6 +13,7 @@ import {
   Subscription,
   SubscriptionInput,
 } from '../api';
+import { packPaymentMethod } from './payment-method';
 import type { Candidate } from './scan';
 
 /** Traceability: which emails produced this row, in the row itself. */
@@ -50,6 +51,9 @@ export function toSubscriptionInput(candidate: Candidate): SubscriptionInput {
     status: candidate.status,
     reminder_days_before: 3,
     snoozed_until: null,
+    // Null rather than omitted, so a subscription whose receipts never named an
+    // instrument reads as "we do not know" instead of inheriting a stale value.
+    payment_method: packPaymentMethod(candidate.payment),
   };
 }
 
@@ -84,6 +88,12 @@ export async function reconcileCandidate(candidate: Candidate): Promise<Subscrip
     default:
       break;
   }
+
+  // The payment method moves whenever the scan learned one, whatever the drift
+  // was. It is not the user's own field to defend — unlike category or notes,
+  // nobody types it — and a card that changed is exactly what they want to see.
+  const payment = packPaymentMethod(candidate.payment);
+  if (payment) patch.payment_method = payment;
 
   return patchSubscription(candidate.existingId, patch);
 }

@@ -34,6 +34,15 @@ export type Subscription = {
    * caller falls back to the day in `next_renewal`, which is the old behaviour.
    */
   anchor_day?: number | null;
+  /**
+   * How this is paid for, packed as `kind|brand|last4|autopay`.
+   *
+   * Filled in by the Gmail scan when a receipt says. Absent on anything added
+   * by hand, and on rows written before the column existed — every reader
+   * copes, because unpackPaymentMethod returns null for anything it cannot
+   * read. See src/gmail/payment-method.ts.
+   */
+  payment_method?: string | null;
   created_at?: string;
 };
 
@@ -187,17 +196,17 @@ export async function createSubscription(input: SubscriptionInput): Promise<Subs
   // The date they picked is the billing day, by definition.
   const anchor = input.anchor_day ?? anchorDayOf(input.next_renewal);
 
-  const attempt = (anchor_day: number | null | undefined) =>
+  const attempt = (extras: LateColumns) =>
     supabase
       .from('subscriptions')
-      .insert({ ...input, anchor_day, user_id })
+      .insert({ ...input, ...extras, user_id })
       .select('*')
       .single();
 
-  let res = await attempt(anchor);
+  let res = await attempt({ anchor_day: anchor, payment_method: input.payment_method });
   // `undefined` is dropped by JSON.stringify, so the retry sends no such key at
   // all rather than sending null into a column that is not there.
-  if (missingColumn(res.error, 'anchor_day')) res = await attempt(undefined);
+  if (missingLateColumn(res.error)) res = await attempt(DROP_LATE_COLUMNS);
 
   if (res.error) throw new Error(res.error.message);
   return toSub(res.data);
@@ -207,39 +216,57 @@ export async function updateSubscription(
   id: string,
   input: SubscriptionInput,
 ): Promise<Subscription> {
-  const attempt = (anchor_day: number | null | undefined) =>
+  const attempt = (extras: LateColumns) =>
     supabase
       .from('subscriptions')
-      .update({ ...input, anchor_day })
+      .update({ ...input, ...extras })
       .eq('id', id)
       .select('*')
       .single();
 
-  let res = await attempt(input.anchor_day);
-  if (missingColumn(res.error, 'anchor_day')) res = await attempt(undefined);
+  let res = await attempt({
+    anchor_day: input.anchor_day,
+    payment_method: input.payment_method,
+  });
+  if (missingLateColumn(res.error)) res = await attempt(DROP_LATE_COLUMNS);
 
   if (res.error) throw new Error(res.error.message);
   return toSub(res.data);
 }
 
 /**
- * Whether the database is telling us a column simply is not there.
+ * Columns added after the first release, whose migrations are run by hand.
  *
- * `anchor_day` arrived after the first release, and the migration is something a
- * person has to remember to run. If the app assumed it existed, the first thing
- * anyone did on an un-migrated database — add a subscription — would fail
- * outright, which is a far worse failure than the drift the column fixes.
+ * Both are optional everywhere they are read, so the app behaves exactly as it
+ * did before against a database where the SQL has not been run. What it must not
+ * do is *assume* them: if it did, the first thing anyone did on an un-migrated
+ * database — add a subscription — would fail outright, which is a far worse
+ * failure than the things these columns fix.
  */
-function missingColumn(
-  error: { code?: string; message?: string } | null,
-  column: string,
-): boolean {
+type LateColumns = {
+  anchor_day?: number | null;
+  payment_method?: string | null;
+};
+
+/** Sends neither key at all; `undefined` is dropped by JSON.stringify. */
+const DROP_LATE_COLUMNS: LateColumns = {
+  anchor_day: undefined,
+  payment_method: undefined,
+};
+
+const LATE_COLUMN_NAMES = ['anchor_day', 'payment_method'];
+
+/** Whether the database is telling us one of those columns is not there. */
+function missingLateColumn(error: { code?: string; message?: string } | null): boolean {
   if (!error) return false;
   // 42703 is Postgres' undefined_column. PGRST204 is PostgREST failing to find
   // it in its cached schema, which is what actually comes back through the
   // client. The message check is the backstop for either wording changing.
   if (error.code === '42703' || error.code === 'PGRST204') return true;
-  return typeof error.message === 'string' && error.message.includes(column);
+  return (
+    typeof error.message === 'string' &&
+    LATE_COLUMN_NAMES.some((c) => error.message?.includes(c))
+  );
 }
 
 /** Update only the named columns — used by the Gmail scan to reconcile drift. */

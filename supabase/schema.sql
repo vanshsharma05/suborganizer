@@ -92,6 +92,23 @@ update public.subscriptions
    set anchor_day = extract(day from next_renewal)::int
  where anchor_day is null;
 
+-- How the money actually leaves: card, UPI, net banking, wallet, or one of the
+-- app stores.
+--
+-- Packed as `kind|brand|last4|autopay` rather than jsonb, so the column can be
+-- read and filtered by anything without a migration to a structured type, and
+-- so a row written by an older client still parses. See
+-- src/gmail/payment-method.ts.
+--
+-- The store cases matter most. A subscription bought through the App Store or
+-- Play cannot be cancelled on the merchant's website at all, and sending
+-- somebody to adobe.com when Apple holds the mandate wastes their afternoon.
+--
+-- Nullable, and every caller copes with it being absent, so the app works
+-- unchanged against a database where this has not been run.
+alter table public.subscriptions
+  add column if not exists payment_method text;
+
 -- The app's hottest read is "my subs, soonest renewal first" (dashboard,
 -- calendar, reminders all sort by it), so index the pair.
 create index if not exists subscriptions_user_renewal_idx

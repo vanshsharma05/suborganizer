@@ -41,6 +41,8 @@ type SubscriptionRow = {
    * supabase/schema.sql.
    */
   anchor_day: number | null;
+  /** Packed payment method; see src/gmail/payment-method.ts. */
+  payment_method: string | null;
   created_at: string;
 };
 
@@ -84,6 +86,7 @@ export type Database = {
           trial_ends?: string | null;
           /** Optional: absent on databases where the migration has not run. */
           anchor_day?: number | null;
+          payment_method?: string | null;
           created_at?: string;
         };
         Row: SubscriptionRow;

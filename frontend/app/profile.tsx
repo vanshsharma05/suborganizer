@@ -26,7 +26,7 @@ import { resetStory } from '@/src/story-storage';
 import { usePurchases } from '@/src/purchases';
 import { PRODUCTS } from '@/src/entitlements';
 import { UpgradeSheet } from '@/src/paywall';
-import { disconnectGmail, getGmailConnection, type GmailConnection } from '@/src/gmail';
+import { disconnectGmail, listMailboxes, mailboxLabel, type Mailbox } from '@/src/gmail';
 import { IconButton, Stat } from '@/src/ui';
 import { Press, Reveal } from '@/src/motion';
 
@@ -105,7 +105,7 @@ export default function ProfileScreen() {
 
   const [savingCur, setSavingCur] = useState(false);
   const [curError, setCurError] = useState<string | null>(null);
-  const [gmail, setGmail] = useState<GmailConnection | null>(null);
+  const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
   const [upgrading, setUpgrading] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
@@ -113,9 +113,9 @@ export default function ProfileScreen() {
   // this one should not still read "Not connected" when you come back.
   useFocusEffect(
     useCallback(() => {
-      getGmailConnection()
-        .then(setGmail)
-        .catch(() => setGmail(null));
+      listMailboxes()
+        .then(setMailboxes)
+        .catch(() => setMailboxes([]));
     }, []),
   );
 
@@ -220,8 +220,8 @@ export default function ProfileScreen() {
 
   const confirmDisconnect = () => {
     Alert.alert(
-      'Disconnect Gmail?',
-      'We stop reading your inbox. Subscriptions already found stay in your list.',
+      mailboxes.length > 1 ? 'Disconnect all inboxes?' : 'Disconnect Gmail?',
+      'We stop reading your mail. Subscriptions already found stay in your list.',
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -229,7 +229,7 @@ export default function ProfileScreen() {
           style: 'destructive',
           onPress: async () => {
             await disconnectGmail();
-            setGmail(null);
+            setMailboxes([]);
           },
         },
       ],
@@ -273,9 +273,14 @@ export default function ProfileScreen() {
     {
       icon: 'mail-outline',
       label: 'Gmail',
-      value: gmail ? gmail.email ?? 'Connected' : 'Not connected',
+      // One inbox shows its address; several show the count, because three
+      // addresses will not fit on a row and the number is the useful part.
+      value:
+        mailboxes.length === 0 ? 'Not connected'
+        : mailboxes.length === 1 ? mailboxLabel(mailboxes[0])
+        : `${mailboxes.length} inboxes`,
       colour: theme.color.brandSecondary,
-      onPress: gmail ? confirmDisconnect : () => router.push('/scan'),
+      onPress: mailboxes.length > 0 ? confirmDisconnect : () => router.push('/scan'),
     },
     {
       // Play keeps the receipt for one-time products forever, so this is a read,

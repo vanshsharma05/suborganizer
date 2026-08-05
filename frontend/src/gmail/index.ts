@@ -1,12 +1,26 @@
 export {
-  connectGmail,
+  accessTokenFor,
+  connectMailbox,
   disconnectGmail,
-  getGmailConnection,
+  disconnectMailbox,
   GmailAuthError,
   gmailUnavailableReason,
   isGmailConfigured,
-  type GmailConnection,
+  listMailboxes,
+  type Mailbox,
 } from './auth';
+
+export { canAddMore, mailboxLabel, MAX_MAILBOXES } from './mailboxes';
+
+export {
+  cancelledAtStore,
+  describePaymentMethod,
+  detectPaymentMethod,
+  packPaymentMethod,
+  unpackPaymentMethod,
+  type PaymentKind,
+  type PaymentMethod,
+} from './payment-method';
 
 export { applyCandidates, importCandidate, reconcileCandidate, type ImportOutcome } from './apply';
 

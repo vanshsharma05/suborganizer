@@ -19,14 +19,18 @@ import { useAuth } from '@/src/auth-context';
 import { fmtMoney } from '@/src/currency';
 import {
   applyCandidates,
+  canAddMore,
   Candidate,
-  connectGmail,
+  connectMailbox,
   disconnectGmail,
+  disconnectMailbox,
   EventKind,
-  getGmailConnection,
   GmailAuthError,
-  GmailConnection,
   gmailUnavailableReason,
+  listMailboxes,
+  Mailbox,
+  mailboxLabel,
+  MAX_MAILBOXES,
   ScanCancelled,
   ScanDepth,
   scanGmail,
@@ -71,7 +75,7 @@ export default function ScanScreen() {
 
   const unavailable = useMemo(() => gmailUnavailableReason(), []);
   const configured = unavailable === null;
-  const [connection, setConnection] = useState<GmailConnection | null>(null);
+  const [mailboxes, setMailboxes] = useState<Mailbox[]>([]);
   const [phase, setPhase] = useState<Phase>('idle');
   const [depth, setDepth] = useState<ScanDepth>('quick');
   const [progress, setProgress] = useState<ScanProgress | null>(null);
@@ -96,9 +100,9 @@ export default function ScanScreen() {
   // that round trip.
   useFocusEffect(
     useCallback(() => {
-      getGmailConnection()
-        .then(setConnection)
-        .catch(() => setConnection(null));
+      listMailboxes()
+        .then(setMailboxes)
+        .catch(() => setMailboxes([]));
     }, []),
   );
 
@@ -106,7 +110,8 @@ export default function ScanScreen() {
     setError(null);
     setPhase('connecting');
     try {
-      setConnection(await connectGmail());
+      await connectMailbox();
+      setMailboxes(await listMailboxes());
       setPhase('idle');
     } catch (e) {
       setPhase('idle');
@@ -118,9 +123,22 @@ export default function ScanScreen() {
 
   const forgetGmail = async () => {
     await disconnectGmail();
-    setConnection(null);
+    setMailboxes([]);
     setResult(null);
     setPhase('idle');
+  };
+
+  /**
+   * Removes one inbox and throws away the last result.
+   *
+   * The result is discarded on purpose: it was built from every connected
+   * mailbox, and leaving it on screen after one is removed would show findings
+   * sourced from mail the app can no longer read.
+   */
+  const forgetOne = async (id: string) => {
+    await disconnectMailbox(id);
+    setMailboxes(await listMailboxes());
+    setResult(null);
   };
 
   /**
@@ -171,7 +189,9 @@ export default function ScanScreen() {
       setPhase('idle');
       if (e instanceof ScanCancelled) return;
       if (e instanceof GmailAuthError) {
-        setConnection(null);
+        // A lapsed grant removes itself; re-read rather than assuming they are
+        // all gone, because the other inboxes are usually still fine.
+        setMailboxes(await listMailboxes().catch(() => []));
         setError(e.message);
         return;
       }
@@ -282,10 +302,14 @@ export default function ScanScreen() {
         <View style={{ flex: 1 }}>
           <Text style={s.title}>Scan Gmail</Text>
           <Text style={s.subtitle} numberOfLines={1}>
-            {connection?.email ?? 'Find subscriptions from your receipts'}
+            {mailboxes.length === 0
+              ? 'Find subscriptions from your receipts'
+              : mailboxes.length === 1
+                ? mailboxLabel(mailboxes[0])
+                : `${mailboxes.length} inboxes connected`}
           </Text>
         </View>
-        {connection && phase !== 'scanning' && (
+        {mailboxes.length > 0 && phase !== 'scanning' && (
           <Pressable onPress={disconnect} style={s.linkBtn} testID="scan-disconnect">
             <Text style={s.linkText}>Disconnect</Text>
           </Pressable>
@@ -306,13 +330,21 @@ export default function ScanScreen() {
 
         {!configured && <NotConfigured reason={unavailable} />}
 
-        {configured && !connection && phase !== 'connecting' && (
+        {configured && mailboxes.length === 0 && phase !== 'connecting' && (
           <ConnectCard onConnect={connect} />
         )}
 
         {phase === 'connecting' && <Busy label="Waiting for Google…" />}
 
-        {configured && connection && phase === 'idle' && (
+        {configured && mailboxes.length > 0 && phase === 'idle' && (
+          <MailboxList
+            mailboxes={mailboxes}
+            onAdd={connect}
+            onRemove={forgetOne}
+          />
+        )}
+
+        {configured && mailboxes.length > 0 && phase === 'idle' && (
           <ScanSetup
             depth={depth}
             onDepth={setDepth}
@@ -513,6 +545,76 @@ function ConnectCard({ onConnect }: { onConnect: () => void }) {
           <Text style={s.primaryText}>Connect Gmail</Text>
         </LinearGradient>
       </Pressable>
+    </Animated.View>
+  );
+}
+
+/**
+ * The inboxes being read, and the way to add another.
+ *
+ * Shown above the scan controls rather than hidden in Account, because this is
+ * where someone is thinking about coverage. A person whose work receipts are
+ * missing needs to see "we are only reading your personal address" at the exact
+ * moment they are about to press Scan, not two screens away.
+ */
+function MailboxList({
+  mailboxes,
+  onAdd,
+  onRemove,
+}: {
+  mailboxes: Mailbox[];
+  onAdd: () => void;
+  onRemove: (id: string) => void;
+}) {
+  const userId = mailboxes[0]?.userId ?? '';
+  const room = canAddMore(mailboxes, userId);
+
+  const confirmRemove = (m: Mailbox) => {
+    Alert.alert(
+      `Stop reading ${mailboxLabel(m)}?`,
+      'Subscriptions already found stay in your list. This only stops future scans reading this inbox.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Remove', style: 'destructive', onPress: () => onRemove(m.id) },
+      ],
+    );
+  };
+
+  return (
+    <Animated.View entering={FadeInDown.duration(360)} style={s.card} testID="scan-mailboxes">
+      <Text style={s.mailHead}>Reading these inboxes</Text>
+
+      {mailboxes.map((m) => (
+        <View key={m.id} style={s.mailRow}>
+          <View style={s.mailDot}>
+            <Ionicons name="mail-outline" size={15} color={theme.color.brandPrimary} />
+          </View>
+          <Text style={s.mailAddress} numberOfLines={1}>{mailboxLabel(m)}</Text>
+          <Pressable
+            onPress={() => confirmRemove(m)}
+            hitSlop={10}
+            testID={`scan-mailbox-remove-${m.id}`}
+          >
+            <Ionicons name="close-circle" size={19} color={theme.color.inkMuted} />
+          </Pressable>
+        </View>
+      ))}
+
+      {room ? (
+        <Pressable onPress={onAdd} style={s.mailAdd} testID="scan-add-mailbox">
+          <Ionicons name="add-circle-outline" size={18} color={theme.color.brandPrimary} />
+          <Text style={s.mailAddText}>Add another inbox</Text>
+        </Pressable>
+      ) : (
+        <Text style={s.mailLimit}>
+          That is all {MAX_MAILBOXES} inboxes. Remove one to connect a different address.
+        </Text>
+      )}
+
+      <Text style={s.mailNote}>
+        Receipts arrive wherever you signed up. Work and personal addresses usually hold different
+        subscriptions, and a scan only finds what it can read.
+      </Text>
     </Animated.View>
   );
 }
@@ -890,6 +992,35 @@ const s = StyleSheet.create({
     textAlign: 'center',
   },
   cardHint: { color: theme.color.inkMuted, fontSize: 11.5, textAlign: 'center' },
+
+  mailHead: {
+    ...theme.type.overline, color: theme.color.inkMuted,
+    alignSelf: 'stretch', marginBottom: 4,
+  },
+  mailRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    alignSelf: 'stretch', paddingVertical: 9,
+    borderBottomWidth: 1, borderBottomColor: theme.color.border,
+  },
+  mailDot: {
+    width: 28, height: 28, borderRadius: 9,
+    backgroundColor: theme.color.brandTint,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  mailAddress: { flex: 1, fontSize: 13.5, fontWeight: '600', color: theme.color.ink },
+  mailAdd: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    alignSelf: 'stretch', minHeight: 44,
+  },
+  mailAddText: { fontSize: 13.5, fontWeight: '700', color: theme.color.brandPrimary },
+  mailLimit: {
+    ...theme.type.caption, color: theme.color.inkMuted,
+    alignSelf: 'stretch', paddingVertical: 10,
+  },
+  mailNote: {
+    ...theme.type.caption, color: theme.color.inkMuted,
+    alignSelf: 'stretch', marginTop: 4, lineHeight: 17,
+  },
   bullets: { alignSelf: 'stretch', gap: 10, marginTop: 4 },
   bulletRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   bulletText: { flex: 1, color: theme.color.inkSoft, fontSize: 12.5, lineHeight: 18 },
