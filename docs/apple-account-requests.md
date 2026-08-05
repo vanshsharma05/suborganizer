@@ -7,8 +7,18 @@ missed item costs all three.
 **Team:** `Ankur Gupta|1627036688|1` — an **Individual** enrolment, which is why
 developer.apple.com cannot be shared however the permissions are set.
 
-Ten minutes of his time, in this order. The order matters: step 6 cannot be done
-before step 5, and step 8 cannot be done before step 6.
+Ten minutes of his time, in this order. The order matters: step 8 cannot be done
+before step 6, and step 2 cannot be done before step 1 is approved.
+
+Every navigation path below was checked against Apple's own help pages on
+4 August 2026, not written from memory. The labels are theirs.
+
+**One thing that is less urgent than it looks:** generating the API key needs
+**Account Holder *or* Admin**, and Vansh is Admin. So the only genuinely
+Account-Holder-exclusive items are **step 1** (requesting API access), **steps
+5–8** (everything on developer.apple.com, because an Individual enrolment never
+shares the portal) and **steps 9–10** (agreements). If step 1 is approved after
+he leaves, the key can still be generated without him.
 
 ---
 
@@ -28,31 +38,45 @@ must be revoked and remade — which means waiting for him to come back.
 
 ---
 
-## Part 1 — App Store Connect · 3 minutes
+## Part 1 — App Store Connect · 2 minutes
 
 Sign in at **appstoreconnect.apple.com** as `ankurshori@gmail.com`.
 
-**1. Turn on API access.** Users and Access → **Integrations** → App Store
-Connect API → **Request Access** → confirm.
+**1. Turn on API access.** This is the only part of Part 1 that is his.
 
-Only the Account Holder sees this button. It is the single biggest blocker: with
-it off, nobody on the team can generate any key at all, and no iOS build can
-happen.
+- **Users and Access** → **Integrations** — the page opens with App Store
+  Connect API already selected
+- **Request Access**
+- Tick the checkbox to agree to the terms → **Submit**
 
-**2. Generate the key.** Same page, **Team Keys** → **+**
+> **Apple does not necessarily approve this on the spot.** Their own
+> documentation says: *"Once submitted, your request is reviewed and approved on
+> a case-by-case basis."* It is often quick, but it is not guaranteed to be, and
+> planning around it being instant is how three days get lost.
 
-- Name: `EAS Build`
-- Access: **Admin** ← not App Manager, not Developer
+**2. Generate the key — and this one does not need him.**
 
-**3. Download it.** Save as `EAS-Build-ASC.p8`. Send it over.
+Generating a Team Key needs **Account Holder *or* Admin**, and Vansh is Admin. So
+if approval has not come through by the time he leaves, nothing is lost: the key
+can be generated the moment it does.
+
+If it *is* approved while he is still there, do it then and there:
+
+- **Users and Access** → **Integrations** → **Team Keys**
+- **Generate API Key** (the **+** appears instead once an active key exists)
+- Name: `EAS Build` — for reference only, not part of the key
+- Under **Access**: **Admin** ← not App Manager, not Developer
+- **Generate**
+
+**3. Download it.** Save as `EAS-Build-ASC.p8`.
 
 **4. Copy two more values from that page.**
 
 - **Key ID** — 10 characters, in the table row next to the key
-- **Issuer ID** — a long UUID at the **top** of the page, above the table
+- **Issuer ID** — a long UUID above the table, not in it
 
-The Issuer ID is the one people miss, because it is not in the table with
-everything else.
+The Issuer ID is the one people miss, precisely because it is not in the table
+with everything else.
 
 ---
 
@@ -69,14 +93,15 @@ signing failure that names nothing in particular.
 While there: **note the membership expiry date.** If it lapses mid-launch
 everything stops, and that is worth knowing in advance rather than discovering.
 
-**6. Register the app identifier.** Certificates, Identifiers & Profiles →
-**Identifiers** → **+**
+**6. Register the app identifier.** **Certificates, Identifiers & Profiles** →
+**Identifiers** in the left sidebar → the **add button (+)** at the **top left**
 
-- **App IDs** → Continue → **App** → Continue
-- Description: `SubOrganizer`
-- Bundle ID: **Explicit** → `com.suborganizer.app`
-- Capabilities: tick **Sign in with Apple**
-- Continue → Register
+- Select **App IDs** → **Continue**
+- **App ID type**: **App** → **Continue**
+- **Description**: `SubOrganizer`
+- Select **Explicit App ID**, and in **Bundle ID** enter `com.suborganizer.app`
+- Under **Capabilities**, tick **Sign in with Apple**
+- **Continue** → review the details → **Register**
 
 The API key from step 2 could do this on its own, but it takes ninety seconds by
 hand and removes any chance of being stuck for three days on a step that turned
@@ -84,22 +109,27 @@ out not to work.
 
 **7. Register the development identifier too.** Same again, one value different:
 
-- Description: `SubOrganizer Dev`
-- Bundle ID: **Explicit** → `com.suborganizer.app.dev`
-- Capabilities: tick **Sign in with Apple**
+- **Description**: `SubOrganizer Dev`
+- **Explicit App ID** → **Bundle ID**: `com.suborganizer.app.dev`
+- **Capabilities**: tick **Sign in with Apple**
 
 This is the variant that installs alongside the store build. Cheap now,
 another three-day wait later.
 
-**8. Create the Sign in with Apple key.** Certificates, Identifiers & Profiles →
-**Keys** → **+**
+**8. Create the Sign in with Apple key.** **Certificates, Identifiers & Profiles**
+→ **Keys** in the left sidebar → the **add button (+)** at the top left
 
-- Name: `SubOrganizer Sign in with Apple`
-- Tick **Sign in with Apple** → **Configure**
-- Primary App ID: **SubOrganizer (com.suborganizer.app)** ← needs step 6 done
-- Save → Continue → Register
-- **Download** — save as `SignInWithApple.p8`, send it over
+- **Key Name**: `SubOrganizer Sign in with Apple`
+- Tick **Sign in with Apple**, then click **Configure** next to that checkbox
+- **Primary App ID**: SubOrganizer (`com.suborganizer.app`) ← needs step 6 done
+- **Save** → **Continue** → **Register**
+- **Download** — save as `SignInWithApple.p8`
 - Copy its **Key ID** as well
+
+Apple's own warning on that screen: *"Save this file in a secure place because
+the key is not saved in your developer account and you won't be able to download
+it again. If the Download button is disabled, you previously downloaded the
+key."*
 
 **Probably not needed, requested anyway.** Native Apple sign-in on iOS wants only
 the bundle identifier in Supabase's *Authorized Client IDs*; this key is for the
@@ -108,21 +138,36 @@ otherwise while he is unreachable.
 
 ---
 
-## Part 3 — Agreements · 1 minute
+## Part 3 — Agreements · 2 minutes
 
-**9.** App Store Connect → **Business** → check the agreement status.
+App Store Connect → **Business** at the top → the **Agreements** tab.
 
-It must read **Active**. If anything is pending acceptance, accept it.
+**Only the Account Holder can sign agreements.** No role can be granted to cover
+this, so anything left unsigned waits for him to come back.
 
-Only the Account Holder can. An unaccepted agreement blocks submission
-completely, and it fails at the very end — after the build, after the upload,
-with a message about your account rather than your app.
+**9. Check the Free Apps agreement is active.** Usually nothing to do — it is
+granted automatically on joining the Apple Developer Program and covers free
+apps. But if a **new version** is pending acceptance, accept it: a stale
+agreement blocks submission, and it fails right at the end, after the build and
+the upload, with a message about the account rather than the app.
+
+**10. Sign the Paid Apps agreement while he is here.** This one is *not*
+automatic and needs banking and tax details that only he has.
+
+Nothing is for sale in the iOS build today — Play Billing is Android-only, so
+this changes nothing about the first release. It is on the list because the
+moment the ₹10 and ₹199 unlocks come to iOS, this becomes a blocker that needs
+the Account Holder, his bank details and his PAN. Doing it now costs him five
+minutes. Doing it later costs whatever the wait for him is.
+
+If he would rather not, that is a reasonable call — just know it is a hard stop
+on iOS purchases until it is signed.
 
 ---
 
 ## Part 4 — Not Apple
 
-**10. A domain.** Google rejected the OAuth branding verification because
+**11. A domain.** Google rejected the OAuth branding verification because
 `vanshsharma05.github.io` is not registrable by us — `github.io` belongs to
 GitHub, and no amount of resubmitting changes that.
 
