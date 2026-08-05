@@ -14,7 +14,7 @@
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "com.suborganizer.app",
-      "buildNumber": "1",
+      "buildNumber": "2",
       "usesAppleSignIn": true,
       "config": {
         "usesNonExemptEncryption": false
@@ -35,6 +35,7 @@
       ]
     },
     "plugins": [
+      "./plugins/no-push-entitlement",
       "expo-router",
       "expo-notifications",
       "expo-iap",
