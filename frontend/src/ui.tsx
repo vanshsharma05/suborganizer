@@ -175,6 +175,9 @@ export function Button({
       disabled={disabled || loading}
       haptic={variant === 'primary' ? 'medium' : 'light'}
       testID={testID}
+      // `sm` is drawn at 38 so it can sit inside a row without dominating it.
+      // The finger still gets 44.
+      hitSlop={slopFor(height)}
       style={[
         shape,
         variant === 'primary' ? theme.shadow.brand : undefined,
@@ -209,9 +212,31 @@ const btn = StyleSheet.create({
   label: { fontWeight: '800', letterSpacing: -0.2 },
 });
 
-/** A circular icon-only control, for headers and row affordances. */
+/** The HIG floor for anything a finger has to land on. */
+const MIN_TARGET = 44;
+
+/**
+ * The slop that brings a control of `drawn` height up to a 44pt target.
+ *
+ * Returns 0 once the control is already big enough, so this can be applied
+ * unconditionally without inflating targets that are correct on their own.
+ */
+function slopFor(drawn: number): number | undefined {
+  const missing = MIN_TARGET - drawn;
+  return missing > 0 ? Math.ceil(missing / 2) : undefined;
+}
+
+/**
+ * A circular icon-only control, for headers and row affordances.
+ *
+ * The drawn circle is 40 by default and the touch target is 44 regardless — the
+ * HIG minimum is about the finger, not the ink. A 44pt disc in a header row
+ * crowds the title beside it, so the slop grows instead of the button, and a
+ * caller passing a smaller `size` gets a wider slop rather than a target nobody
+ * can hit.
+ */
 export function IconButton({
-  icon, onPress, size = 40, tone = 'neutral', testID, style,
+  icon, onPress, size = 40, tone = 'neutral', testID, style, accessibilityLabel,
 }: {
   icon: Icon;
   onPress: () => void;
@@ -219,6 +244,8 @@ export function IconButton({
   tone?: 'neutral' | 'brand' | 'inverse';
   testID?: string;
   style?: StyleProp<ViewStyle>;
+  /** There is no text here to read out, so screen readers need this. */
+  accessibilityLabel?: string;
 }) {
   const bg =
     tone === 'brand' ? theme.color.brandTint :
@@ -230,7 +257,14 @@ export function IconButton({
     theme.color.ink;
 
   return (
-    <Press onPress={onPress} testID={testID} scale={0.92} style={style as ViewStyle}>
+    <Press
+      onPress={onPress}
+      testID={testID}
+      scale={0.92}
+      hitSlop={slopFor(size)}
+      accessibilityLabel={accessibilityLabel}
+      style={style as ViewStyle}
+    >
       <View
         style={[
           {

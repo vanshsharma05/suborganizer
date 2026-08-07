@@ -34,7 +34,21 @@ export const theme = {
     // Ink. Deepened for contrast; the old #1A1C1E on cream was under 12:1.
     ink: '#131518',
     inkSoft: '#54565A',
-    inkMuted: '#8E8B85',
+    /**
+     * Secondary text — subtitles, meta rows, captions. 64 places use it.
+     *
+     * Was #8E8B85, which is 3.40:1 on white and 3.26:1 on the page. Both are
+     * under the 4.5:1 that normal-size text needs, and most of what wears this
+     * colour is 11–13pt, so none of it qualified for the large-text exemption.
+     *
+     * #706D67 is the same warm grey, deepened until it clears 4.5:1 on every
+     * ground that actually carries text — white, the page, and the secondary
+     * fill. surfaceTertiary is excluded on purpose: it is a grabber handle and a
+     * 3px progress track, and solving for it would have forced this to #67645E,
+     * close enough to inkSoft to collapse the two into one step.
+     */
+    inkMuted: '#706D67',
+    /** Decoration only — chevrons, out-of-month dates. Never text. */
     inkFaint: '#B5B1A9',
     onInverse: '#FCFAF7',
 
@@ -48,7 +62,16 @@ export const theme = {
     brandSecondaryDeep: '#0B7A70',
     brandSecondaryTint: '#E3F5F2',
 
-    gold: '#C9A34A',
+    /**
+     * The Pro marker, and nothing else.
+     *
+     * Was #C9A34A, which is 2.28:1 on the page — it fails as text by a wide
+     * margin, and profile.tsx sets the word "PRO" in it at 10pt. #836423 clears
+     * 4.5:1 on every ground text sits on. It reads as antique gold rather than
+     * the lighter leaf it was; `goldGradient` is untouched, so the decorative
+     * use is unchanged.
+     */
+    gold: '#836423',
     success: '#0A8754',
     successTint: '#E4F4EC',
     warning: '#C77A08',
@@ -129,8 +152,17 @@ export const theme = {
    * interface feel like a single piece of software rather than a pile of screens.
    */
   motion: {
-    /** Snappy, barely any overshoot. Presses, toggles, chips. */
-    press: { damping: 18, stiffness: 420, mass: 0.6 },
+    /**
+     * Snappy, barely any overshoot. Presses, toggles, chips.
+     *
+     * Damping was 18, which is a ratio of 0.57 — an 11.5% overshoot and 267ms to
+     * settle. That is a rubbery bounce, not the "barely any" this line claimed.
+     * At 25 the ratio is 0.79: overshoot drops to under 2% and it settles in
+     * ~190ms, so it is both calmer and faster. A finger-follow that visibly
+     * springs past its target reads as toy-like, and it is the one curve every
+     * tap in the app goes through.
+     */
+    press: { damping: 25, stiffness: 420, mass: 0.6 },
     /** Softer, visible settle. Entrances, sheets, layout shifts. */
     enter: { damping: 20, stiffness: 180, mass: 0.9 },
     /** For anything crossing the whole screen. */
