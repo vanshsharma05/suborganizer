@@ -228,8 +228,20 @@ export default function ProfileScreen() {
           text: 'Disconnect',
           style: 'destructive',
           onPress: async () => {
-            await disconnectGmail();
-            setMailboxes([]);
+            try {
+              await disconnectGmail();
+            } catch {
+              Alert.alert(
+                'Could not disconnect',
+                `Something went wrong reaching Google. Your inboxes may still be connected — try again, or remove access from your Google account directly.`,
+              );
+            } finally {
+              // Re-read rather than assuming the list is empty. disconnectGmail
+              // clears the store before it revokes, so a failure part-way
+              // through leaves a state neither "connected" nor "not" — and the
+              // row should say whichever is actually true.
+              setMailboxes(await listMailboxes().catch(() => []));
+            }
           },
         },
       ],
@@ -291,7 +303,19 @@ export default function ProfileScreen() {
       colour: theme.color.inkSoft,
       trailing: 'none',
       onPress: async () => {
-        await refreshPurchases();
+        // Unguarded, this row did nothing at all when the store could not be
+        // reached: no alert, no error, no change. It exists precisely for the
+        // person on a new phone who has paid and cannot see it, and that person
+        // is the most likely of anyone to be on a bad connection.
+        try {
+          await refreshPurchases();
+        } catch {
+          Alert.alert(
+            'Could not reach the store',
+            `Check your connection and try again. Nothing has been lost — your purchase is held by the store, not by us. If it still will not appear, email ${SUPPORT_EMAIL}.`,
+          );
+          return;
+        }
         Alert.alert(
           'Purchases restored',
           pro
