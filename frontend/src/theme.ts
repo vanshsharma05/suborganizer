@@ -168,8 +168,22 @@ export const theme = {
     /** For anything crossing the whole screen. */
     travel: { damping: 24, stiffness: 120, mass: 1 },
     duration: { fast: 160, base: 280, slow: 480, count: 1200 },
-    /** Delay between items in a staggered list. */
-    stagger: 55,
+    /**
+     * Delay between items in a staggered list.
+     *
+     * Was 55, which Reveal caps at ten items — 550ms of cascade before the last
+     * card even begins, and another ~360 for the enter spring to settle. On the
+     * dashboard's "Coming up" row that meant the tail was still arriving a full
+     * second in, which reads as the screen struggling rather than as
+     * choreography.
+     *
+     * At 28 the same row is complete in about three quarters of that. The point
+     * of a stagger is to give the eye an order to read in, and it only needs to
+     * be perceptible — past roughly 30ms it stops being rhythm and starts being
+     * waiting. Only four call sites pass `index`, so this moves those lists and
+     * nothing else.
+     */
+    stagger: 28,
   },
 };
 

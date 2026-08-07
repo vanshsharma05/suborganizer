@@ -7,24 +7,42 @@ import Animated, { FadeInDown, FadeOut, LinearTransition } from 'react-native-re
 import { theme } from './theme';
 import { BrandAvatar, formatMoney } from './ui';
 import { cancelSubscription, keepSubscription, ReminderItem, snoozeSubscription } from './api';
+import { describeError } from './supabase';
 import { useAuth } from './auth-context';
 import { CancelSheet } from './cancel-sheet';
 import { Press } from './motion';
 
-export function RemindersSection() {
+function RemindersSectionInner() {
   const { reminders, refreshSubs } = useAuth();
   const router = useRouter();
   const [busyId, setBusyId] = useState<string | null>(null);
   // The subscription whose cancellation sheet is open, if any.
   const [cancelling, setCancelling] = useState<ReminderItem | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
 
   if (!reminders || reminders.length === 0) return null;
 
+  /**
+   * Runs one of the row actions and says so when it does not work.
+   *
+   * Every one of these writes goes through updateSub, which throws on a failed
+   * request. There was no catch here, so a tap on "Keep it" with no signal set
+   * the spinner, cleared it, and rejected into nothing — LogBox is off in this
+   * app, so not even a warning surfaced. The reminder stayed exactly where it
+   * was and the button looked broken rather than unlucky.
+   *
+   * The message replaces the section's subtitle rather than opening a dialog:
+   * this is one widget on a dashboard, and it should fail in its own space
+   * without taking the screen with it.
+   */
   const act = async (item: ReminderItem, action: () => Promise<unknown>) => {
     setBusyId(item.id);
+    setFailed(null);
     try {
       await action();
       await refreshSubs();
+    } catch (e) {
+      setFailed(describeError(e, 'That did not go through. Try again.'));
     } finally {
       setBusyId(null);
     }
@@ -38,7 +56,9 @@ export function RemindersSection() {
         </View>
         <View style={{ flex: 1 }}>
           <Text style={styles.title}>Heads up — charges coming</Text>
-          <Text style={styles.sub}>{'Review before you\'re billed. Keep it, or cancel now.'}</Text>
+          <Text style={[styles.sub, failed != null && styles.subFailed]}>
+            {failed ?? 'Review before you\'re billed. Keep it, or cancel now.'}
+          </Text>
         </View>
       </View>
 
@@ -89,6 +109,17 @@ export function RemindersSection() {
     </View>
   );
 }
+
+/**
+ * Memoised because it takes no props and lives on the busiest screen.
+ *
+ * The dashboard re-renders on its own state — pull-to-refresh, the notification
+ * prompt, the usage log landing — and each of those used to re-render this
+ * whole section and its rows with it. It reads `reminders` from context itself,
+ * so it still updates the moment that changes; what it no longer does is redraw
+ * because something unrelated further up moved.
+ */
+export const RemindersSection = React.memo(RemindersSectionInner);
 
 function ReminderRow({
   item, busy, onKeep, onCancel, onSnooze,
@@ -185,6 +216,7 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   title: { ...theme.type.bodyStrong, color: theme.color.ink },
+  subFailed: { color: theme.color.error },
   sub: { ...theme.type.caption, color: theme.color.inkSoft, marginTop: 1 },
   row: {
     borderRadius: theme.radius.md, backgroundColor: theme.color.surfaceSecondary, padding: 12,

@@ -156,6 +156,10 @@ export default function Dashboard() {
   const [usage, setUsage] = useState<UsageLog>({});
   const [reviewing, setReviewing] = useState(false);
 
+  // Stable, so React.memo on UsageReview actually holds. An inline arrow here
+  // is a new prop on every dashboard render, which is most of them.
+  const closeReview = useCallback(() => setReviewing(false), []);
+
   useEffect(() => {
     void readUsage().then(setUsage);
   }, []);
@@ -700,7 +704,7 @@ export default function Dashboard() {
         queue={reviewQueue}
         log={usage}
         onLog={setUsage}
-        onClose={() => setReviewing(false)}
+        onClose={closeReview}
       />
     </View>
   );

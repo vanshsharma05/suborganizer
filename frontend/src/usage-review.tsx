@@ -28,7 +28,7 @@ import { monthlyEquivalent } from './cycles';
 import type { Subscription } from './api';
 import { record, writeUsage, type UsageLog } from './usage';
 
-export function UsageReview({
+function UsageReviewInner({
   visible,
   queue,
   log,
@@ -216,3 +216,13 @@ const s = StyleSheet.create({
     maxWidth: 300, marginBottom: 14,
   },
 });
+
+/**
+ * Memoised, and it matters more here than it looks.
+ *
+ * This is mounted by the dashboard on every render whether or not it is visible,
+ * and it holds the review queue and the whole usage log. Its props are stable
+ * now that onClose is a useCallback, so a pull-to-refresh no longer walks this
+ * subtree to discover that `visible` is still false.
+ */
+export const UsageReview = React.memo(UsageReviewInner);
