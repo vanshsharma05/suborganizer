@@ -77,7 +77,31 @@ async function call<T>(path: string, token: string, params: Record<string, strin
       clearTimeout(timer);
     }
 
-    if (res.ok) return (await res.json()) as T;
+    if (res.ok) {
+      /*
+       * A 200 is not a promise of JSON.
+       *
+       * The parse sat outside the try that wraps the fetch, so anything
+       * answering 200 with something else threw a raw SyntaxError straight out
+       * of here and took the whole scan with it. The case that actually happens
+       * is a captive portal — hotel and airport wifi intercept the request and
+       * return their own login page with a perfectly good status code.
+       *
+       * Treated as retryable rather than fatal, because that is what it usually
+       * is: the same request a moment later, once the portal is satisfied or the
+       * proxy has stopped meddling, returns real JSON. After the last attempt it
+       * fails with a sentence about the connection, which is the true cause.
+       */
+      try {
+        return (await res.json()) as T;
+      } catch {
+        if (attempt >= 4) {
+          throw new Error('Gmail sent something we could not read. Check your connection and scan again.');
+        }
+        await new Promise((r) => setTimeout(r, 400 * 2 ** attempt));
+        continue;
+      }
+    }
 
     if (res.status === 401) {
       throw new GmailAuthError('Gmail rejected the access token. Connect again to scan.');

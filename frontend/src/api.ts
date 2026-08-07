@@ -103,7 +103,9 @@ export async function fetchProfile(): Promise<User | null> {
 
   // The row is created by a trigger on signup. If it is somehow missing, fall
   // back to auth metadata rather than blocking the user out of the app.
-  if (error && error.code !== 'PGRST116') throw new Error(error.message);
+  if (error && error.code !== 'PGRST116') {
+    throw new Error(describeError(error, 'Could not load your profile.'));
+  }
 
   return {
     id: auth.user.id,
@@ -131,7 +133,7 @@ export async function setDisplayName(name: string): Promise<void> {
 
   const id = await currentUserId();
   const { error } = await supabase.from('profiles').update({ name: trimmed }).eq('id', id);
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(describeError(error, 'Could not save that name.'));
 
   await supabase.auth.updateUser({ data: { full_name: trimmed } });
 }
@@ -142,7 +144,7 @@ export async function updatePrimaryCurrency(currency: string): Promise<void> {
     .from('profiles')
     .update({ primary_currency: currency.toUpperCase() })
     .eq('id', id);
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(describeError(error, 'Could not change your currency.'));
 }
 
 /**
@@ -173,7 +175,7 @@ export async function deleteAccount(): Promise<void> {
 export async function setProFlag(is_pro: boolean): Promise<void> {
   const id = await currentUserId();
   const { error } = await supabase.from('profiles').update({ is_pro }).eq('id', id);
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(describeError(error, 'Could not update your account.'));
 }
 
 // ------------------------------------------------------------ subscriptions --
@@ -185,7 +187,7 @@ export async function listSubscriptions(): Promise<Subscription[]> {
     .from('subscriptions')
     .select('*')
     .order('next_renewal', { ascending: true });
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(describeError(error, 'Could not load your subscriptions.'));
   return (data ?? []).map(toSub);
 }
 
@@ -239,7 +241,7 @@ async function insertSub(body: SubInsert): Promise<Subscription> {
   let res = await send(body);
   if (missingLateColumn(res.error)) res = await send(withoutLateColumns(body));
 
-  if (res.error) throw new Error(res.error.message);
+  if (res.error) throw new Error(describeError(res.error, 'Could not save that subscription.'));
   return toSub(res.data);
 }
 
@@ -250,7 +252,7 @@ async function updateSub(id: string, patch: SubUpdate): Promise<Subscription> {
   let res = await send(patch);
   if (missingLateColumn(res.error)) res = await send(withoutLateColumns(patch));
 
-  if (res.error) throw new Error(res.error.message);
+  if (res.error) throw new Error(describeError(res.error, 'Could not save that subscription.'));
   return toSub(res.data);
 }
 
@@ -284,7 +286,7 @@ export async function patchSubscription(
 
 export async function deleteSubscription(id: string): Promise<void> {
   const { error } = await supabase.from('subscriptions').delete().eq('id', id);
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(describeError(error, 'Could not delete that subscription.'));
 }
 
 export async function toggleSubscription(id: string, current: string): Promise<Subscription> {
@@ -332,7 +334,7 @@ export async function listPriceChanges(limit = 50): Promise<PriceChange[]> {
     .select('id, subscription_id, old_amount, new_amount, currency, changed_at')
     .order('changed_at', { ascending: false })
     .limit(limit);
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(describeError(error, 'Could not load price changes.'));
 
   return (data ?? []).map((r) => ({
     ...r,
@@ -344,7 +346,7 @@ export async function listPriceChanges(limit = 50): Promise<PriceChange[]> {
 /** Forget a logged change — the "dismiss" action on a price-rise card. */
 export async function dismissPriceChange(id: string): Promise<void> {
   const { error } = await supabase.from('price_changes').delete().eq('id', id);
-  if (error) throw new Error(error.message);
+  if (error) throw new Error(describeError(error, 'Could not dismiss that.'));
 }
 
 // ----------------------------------------------------------------- reminders --

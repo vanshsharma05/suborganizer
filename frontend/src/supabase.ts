@@ -88,15 +88,36 @@ function fetchWithTimeout(input: RequestInfo | URL, init?: RequestInit): Promise
 }
 
 /**
+ * The message out of anything that might carry one.
+ *
+ * Errors from PostgREST are plain objects, not Error instances — `String()` on
+ * one yields "[object Object]", which is how a caller handing us a Supabase
+ * error would have shown the user nothing at all.
+ */
+function messageOf(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === 'string') return e;
+  if (e && typeof e === 'object' && 'message' in e) {
+    const m = (e as { message?: unknown }).message;
+    if (typeof m === 'string') return m;
+  }
+  return '';
+}
+
+/**
  * Turns a transport failure into something worth showing someone.
  *
  * A timeout surfaces as `AbortError: Aborted` and React Native's own failure as
  * `Network request failed`. Neither tells the user anything, and "Aborted" in
  * particular reads like the app gave up for its own reasons rather than the
  * connection being the problem.
+ *
+ * Offline and server-error are deliberately different sentences. "Check your
+ * connection" sends someone to look at their wifi; a Postgres constraint
+ * violation phrased that way sends them to look at the wrong thing entirely.
  */
 export function describeError(e: unknown, fallback: string): string {
-  const message = e instanceof Error ? e.message : String(e ?? '');
+  const message = messageOf(e);
 
   if (/abort|timed out|timeout/i.test(message)) {
     return 'The server took too long to respond. Check your connection and try again.';

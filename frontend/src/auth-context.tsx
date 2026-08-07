@@ -5,6 +5,7 @@ import Constants from 'expo-constants';
 import * as Crypto from 'expo-crypto';
 import * as WebBrowser from 'expo-web-browser';
 import { describeAppleError, greetingName, nameToStore, wasCancelled } from './apple';
+import { purgeSessionData } from './session-data';
 import { describeError, supabase } from './supabase';
 import { disconnectGmail } from './gmail/auth';
 import { invalidateReminderCache } from './notifications';
@@ -393,6 +394,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // decides what the user sees, so a failure here must not strand them
       // signed in on a screen they asked to leave.
     });
+    // Their answers, their dismissed findings, and the cached entitlements.
+    // The Gmail grant is already gone above — revoked, not just deleted — but
+    // none of this was, so on a shared device the next person inherited a
+    // usage log they never filled in and unlocks they never bought.
+    await purgeSessionData();
     hydratedFor.current = null;
     // The reminder scheduler skips work when the subscription list looks
     // unchanged. That cache is module-level and would otherwise outlive the
