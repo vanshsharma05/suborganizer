@@ -39,6 +39,7 @@ import { dismissPriceChange } from '@/src/api';
 import { activeTrials, splitByTrial, trialDaysLeft, trialLabel } from '@/src/trials';
 import { findPriceRises } from '@/src/price-watch';
 import { RemindersSection } from '@/src/reminders';
+import { useTabBarSpace } from './_layout';
 import { UsageReview } from '@/src/usage-review';
 import { dueForReview, prune, readUsage, writeUsage, type UsageLog } from '@/src/usage';
 import { getNotifPermission, requestNotifPermission, rescheduleReminders } from '@/src/notifications';
@@ -125,6 +126,7 @@ const ring = StyleSheet.create({
 
 export default function Dashboard() {
   const insets = useSafeAreaInsets();
+  const tabBarSpace = useTabBarSpace();
   const router = useRouter();
   const {
     user, subs, subsError, subsLoading, refreshSubs, reminders, refreshReminders, priceChanges,
@@ -336,7 +338,7 @@ export default function Dashboard() {
       <AnimatedScrollView
         onScroll={onScroll}
         scrollEventThrottle={16}
-        contentContainerStyle={{ paddingBottom: insets.bottom + 108 }}
+        contentContainerStyle={{ paddingBottom: tabBarSpace + 24 }}
         refreshControl={
           // `tintColor` is the iOS spinner and `colors` is the Android one —
           // setting only the first left Android with its default blue, the one

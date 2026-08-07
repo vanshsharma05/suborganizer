@@ -35,6 +35,7 @@ import { theme } from '@/src/theme';
 import { useAuth } from '@/src/auth-context';
 import { Badge, BrandAvatar, Button, Card, EmptyState, formatMoney } from '@/src/ui';
 import { CountUp, groupDigits, Press, Reveal, Skeleton } from '@/src/motion';
+import { useTabBarSpace } from './_layout';
 import { fitText } from '@/src/fit-text';
 import { convertToPrimary, symbolFor, useExchangeRate } from '@/src/currency';
 import { runAudit, type Saving, type SavingConfidence } from '@/src/savings';
@@ -87,6 +88,7 @@ const ICON: Record<Saving['kind'], keyof typeof Ionicons.glyphMap> = {
 
 export default function SavingsScreen() {
   const insets = useSafeAreaInsets();
+  const tabBarSpace = useTabBarSpace();
   const router = useRouter();
   const { user, subs, subsLoading, priceChanges, refreshSubs, refreshPriceChanges } = useAuth();
   const { unlocked } = usePurchases();
@@ -215,7 +217,7 @@ export default function SavingsScreen() {
   return (
     <View style={{ flex: 1, backgroundColor: theme.color.surface }}>
       <ScrollView
-        contentContainerStyle={{ paddingTop: insets.top + 16, paddingBottom: insets.bottom + 110 }}
+        contentContainerStyle={{ paddingTop: insets.top + 16, paddingBottom: tabBarSpace + 24 }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}

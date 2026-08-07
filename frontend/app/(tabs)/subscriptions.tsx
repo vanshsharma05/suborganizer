@@ -36,6 +36,7 @@ import {
   Badge, BrandAvatar, Button, EmptyState, IconButton, SearchField, Segmented, formatMoney,
 } from '@/src/ui';
 import { Press, Skeleton } from '@/src/motion';
+import { useTabBarSpace } from './_layout';
 import { convertToPrimary, fmtMoney, useExchangeRate } from '@/src/currency';
 import type { Subscription } from '@/src/api';
 
@@ -52,6 +53,7 @@ const separator = () => <View style={{ height: 10 }} />;
 
 export default function SubscriptionsScreen() {
   const insets = useSafeAreaInsets();
+  const tabBarSpace = useTabBarSpace();
   const router = useRouter();
   const { subs, subsLoading, refreshSubs, user } = useAuth();
 
@@ -276,7 +278,7 @@ export default function SubscriptionsScreen() {
         data={filtered}
         keyExtractor={(i) => i.id}
         contentContainerStyle={{
-          paddingHorizontal: 20, paddingTop: 14, paddingBottom: insets.bottom + 110,
+          paddingHorizontal: 20, paddingTop: 14, paddingBottom: tabBarSpace + 24,
         }}
         ItemSeparatorComponent={separator}
         refreshControl={

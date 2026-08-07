@@ -39,6 +39,32 @@ const PILL_H = 34;
 /** Gap between the pill and the edge of its slot. */
 const PILL_INSET = 4;
 
+/** Vertical padding inside the floating card, above and below the icon row. */
+const CARD_PAD_V = 9;
+/** The label under each icon: 10pt type, 3pt above it, rounded up for line height. */
+const LABEL_H = 16;
+/** Gap between the bottom of the card and the bottom of the screen. */
+const WRAP_BOTTOM = 6;
+
+/**
+ * How much of the bottom of the screen the floating bar covers.
+ *
+ * Every tab screen has to keep its last row clear of this, and each one used to
+ * carry its own hand-picked number — 108 on Home, 110 on the other two, none of
+ * them derived from the bar itself. They happened to be large enough, but only
+ * by accident: change the pill height or the label size and all three are wrong
+ * with nothing to say so.
+ *
+ * The inset is folded in here rather than added by the caller, because the bar's
+ * own padding is `max(insets.bottom, 10)` — a screen adding a raw `insets.bottom`
+ * on top is not measuring the same thing the bar is.
+ */
+export function useTabBarSpace(): number {
+  const insets = useSafeAreaInsets();
+  const card = CARD_PAD_V * 2 + PILL_H + LABEL_H;
+  return WRAP_BOTTOM + Math.max(insets.bottom, 10) + card;
+}
+
 function TabItem({
   routeName, focused, onPress, badgeCount,
 }: {
