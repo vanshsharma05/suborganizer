@@ -135,6 +135,19 @@ async function pool<T, R>(
   let cursor = 0;
   let completed = 0;
 
+  /*
+   * Fails fast on purpose.
+   *
+   * Promise.all subscribes to every runner as it iterates, so a rejection from
+   * a later one is still handled — it does not become an unhandled rejection,
+   * which is worth writing down because it looks like it should. Rejecting on
+   * the first is also what makes Cancel feel immediate: the scan stops at the
+   * quickest runner to notice rather than the slowest.
+   *
+   * The siblings keep running and write into `out` after this has thrown. That
+   * is harmless — the caller has an exception and never reads the array — and
+   * each is capped by REQUEST_TIMEOUT_MS.
+   */
   const runners = Array.from({ length: Math.min(CONCURRENCY, items.length) }, async () => {
     for (;;) {
       const i = cursor++;
