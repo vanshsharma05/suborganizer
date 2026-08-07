@@ -509,7 +509,9 @@ function Form({
               value={amount}
               onChangeText={setAmount}
               placeholder="0"
-              placeholderTextColor={theme.color.inkFaint}
+              // inkFaint is 2.05:1 — decoration weight, and a placeholder is
+              // text. inkMuted is the quietest token that still clears 4.5:1.
+              placeholderTextColor={theme.color.inkMuted}
               keyboardType="decimal-pad"
               style={s.amountInput}
               testID="form-amount"

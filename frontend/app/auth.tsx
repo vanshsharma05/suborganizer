@@ -416,7 +416,7 @@ export default function AuthScreen() {
                   value={name}
                   onChangeText={setName}
                   placeholder="Your name"
-                  placeholderTextColor="rgba(255,255,255,0.55)"
+                  placeholderTextColor="rgba(255,255,255,0.78)"
                   style={[s.input, focus === 'name' && s.inputFocused]}
                   autoCapitalize="words"
                   autoComplete="name"
@@ -436,7 +436,7 @@ export default function AuthScreen() {
                 value={email}
                 onChangeText={setEmail}
                 placeholder="you@example.com"
-                placeholderTextColor="rgba(255,255,255,0.55)"
+                placeholderTextColor="rgba(255,255,255,0.78)"
                 keyboardType="email-address"
                 autoCapitalize="none"
                 autoCorrect={false}
@@ -459,7 +459,7 @@ export default function AuthScreen() {
                   value={password}
                   onChangeText={setPassword}
                   placeholder={mode === 'signup' ? 'At least 6 characters' : 'Password'}
-                  placeholderTextColor="rgba(255,255,255,0.55)"
+                  placeholderTextColor="rgba(255,255,255,0.78)"
                   secureTextEntry={!reveal}
                   autoCapitalize="none"
                   // Tells a password manager whether to offer the saved one or
@@ -606,16 +606,29 @@ const s = StyleSheet.create({
     textAlign: 'center', paddingHorizontal: 6,
   },
 
+  /*
+   * The scrim is what makes white text legible here, not the white itself.
+   *
+   * At 0.2 the field over the lightest gradient stop left typed text at 3.11:1
+   * and the placeholder at 1.96:1 — both under the 4.5:1 text needs. Raising the
+   * text's own opacity cannot fix that: white on light coral tops out around
+   * 2.8:1 whatever you do to the foreground, because the background is the
+   * limit. Deepening the scrim moves the background instead, and it is a change
+   * to this one field rather than to the brand gradient underneath.
+   *
+   * Solved against the lightest stop, so the other two are only safer: typed
+   * text 5.43:1 at rest and 6.79:1 focused.
+   */
   input: {
     height: 54, borderRadius: theme.radius.md,
-    backgroundColor: 'rgba(0,0,0,0.2)',
+    backgroundColor: 'rgba(0,0,0,0.42)',
     borderWidth: 1, borderColor: 'rgba(255,255,255,0.24)',
     paddingHorizontal: 18, color: '#FFFFFF', fontSize: 16, fontWeight: '600',
   },
   /** Which box the keyboard is typing into, which nothing said before. */
   inputFocused: {
     borderColor: 'rgba(255,255,255,0.9)',
-    backgroundColor: 'rgba(0,0,0,0.28)',
+    backgroundColor: 'rgba(0,0,0,0.5)',
   },
   inputWithButton: { paddingRight: 52 },
 

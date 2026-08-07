@@ -155,7 +155,12 @@ export function Button({
       ) : (
         <>
           {icon && <Ionicons name={icon} size={fontSize + 3} color={fg} />}
-          <Text style={[btn.label, { color: fg, fontSize }]} numberOfLines={1}>{label}</Text>
+          <Text
+            style={[btn.label, { color: fg, fontSize }, gradient != null && btn.labelOnGradient]}
+            numberOfLines={1}
+          >
+            {label}
+          </Text>
           {iconAfter && <Ionicons name={iconAfter} size={fontSize + 3} color={fg} />}
         </>
       )}
@@ -210,6 +215,26 @@ export function Button({
 const btn = StyleSheet.create({
   inner: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
   label: { fontWeight: '800', letterSpacing: -0.2 },
+  /**
+   * A soft edge under white text on the coral gradient.
+   *
+   * White on the gradient measures 2.02:1 at the light stop and 2.85:1 where the
+   * label actually sits — under the 3:1 that 15.5pt bold needs. The fix that
+   * would satisfy a contrast checker is a darker gradient, and that gradient is
+   * the brand: it is on the splash, the auth hero and three cards, so changing
+   * it here would change the app's identity to settle a button.
+   *
+   * This is the optical answer instead. Be clear about what it does and does
+   * not do: a shadow gives the glyph edges something to sit against and is
+   * genuinely easier to read, but WCAG compares foreground to background and
+   * gives shadows no credit, so the measured figure is still 2.85:1. Kept wide
+   * and faint — a tight dark shadow on a button label reads as letterpress.
+   */
+  labelOnGradient: {
+    textShadowColor: 'rgba(120,38,20,0.32)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 3,
+  },
 });
 
 /** The HIG floor for anything a finger has to land on. */
