@@ -98,7 +98,23 @@ export async function reconcileCandidate(candidate: Candidate): Promise<Subscrip
   return patchSubscription(candidate.existingId, patch);
 }
 
-export type ImportOutcome = { imported: number; reconciled: number; failed: string[] };
+export type ImportOutcome = {
+  imported: number;
+  reconciled: number;
+  /**
+   * What did not go through, identified by `key` and not by `name`.
+   *
+   * These were names, and the caller built its "these landed, drop them" set by
+   * testing candidate names against them. Keys are `domain:product`, so two
+   * candidates routinely share a display name — google.com:one and
+   * google.com:workspace are both "Google". One of them failing marked both as
+   * failed, so the one that had actually been written stayed on screen and
+   * stayed ticked, and the retry it invited inserted it a second time.
+   *
+   * The name rides along because the alert has to name them to the user.
+   */
+  failed: { key: string; name: string }[];
+};
 
 /** Applies a selection, keeping going past individual failures. */
 export async function applyCandidates(candidates: Candidate[]): Promise<ImportOutcome> {
@@ -115,7 +131,7 @@ export async function applyCandidates(candidates: Candidate[]): Promise<ImportOu
         outcome.imported++;
       }
     } catch {
-      outcome.failed.push(candidate.name);
+      outcome.failed.push({ key: candidate.key, name: candidate.name });
     }
   }
 

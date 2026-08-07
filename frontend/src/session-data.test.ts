@@ -18,6 +18,9 @@ vi.mock('@react-native-async-storage/async-storage', () => ({
   default: { multiRemove },
 }));
 
+/* eslint-disable import/first -- vi.mock is hoisted above every import in
+   the file, so the module under test has to be imported after the mock is
+   declared or it binds to the real dependency. Reordering breaks the test. */
 import { KEPT_ON_SIGN_OUT, PURGED_ON_SIGN_OUT, purgeSessionData } from './session-data';
 
 /**

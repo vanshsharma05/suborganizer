@@ -79,6 +79,32 @@ export default function ScanScreen() {
   const [phase, setPhase] = useState<Phase>('idle');
   const [depth, setDepth] = useState<ScanDepth>('quick');
   const [progress, setProgress] = useState<ScanProgress | null>(null);
+
+  /*
+   * Progress arrives once per message, and this screen is the largest in the
+   * app. Handing setProgress straight to the scanner meant a deep scan — 800
+   * headers — re-rendered the whole tree 800 times, competing with the very
+   * requests it was reporting on.
+   *
+   * Ten updates a second is past the rate anyone can read a counter, so the
+   * throttle costs nothing visible. Two things always get through regardless: a
+   * change of stage, because "Reading" -> "Details" should be immediate, and the
+   * last item of a phase, so the count never freezes short of its total.
+   */
+  const lastTickAt = useRef(0);
+  const lastStage = useRef<ScanProgress['stage'] | null>(null);
+
+  const onScanProgress = useCallback((p: ScanProgress) => {
+    const now = Date.now();
+    const staged = p.stage !== lastStage.current;
+    const finishing = p.total > 0 && p.done >= p.total;
+
+    if (!staged && !finishing && now - lastTickAt.current < 100) return;
+
+    lastStage.current = p.stage;
+    lastTickAt.current = now;
+    setProgress(p);
+  }, []);
   const [result, setResult] = useState<ScanResult | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -164,6 +190,8 @@ export default function ScanScreen() {
     setError(null);
     setResult(null);
     setProgress(null);
+    lastStage.current = null;
+    lastTickAt.current = 0;
     setPhase('scanning');
     abortRef.current = { cancelled: false };
 
@@ -172,7 +200,7 @@ export default function ScanScreen() {
         depth,
         existing: subs,
         signal: abortRef.current,
-        onProgress: setProgress,
+        onProgress: onScanProgress,
       });
 
       setResult(scan);
@@ -248,8 +276,13 @@ export default function ScanScreen() {
 
       // Drop what landed, so a second tap cannot create a duplicate row. Anything
       // that failed stays on screen and stays ticked, ready to retry.
-      const failed = new Set(outcome.failed);
-      const applied = new Set(chosen.filter((c) => !failed.has(c.name)).map((c) => c.key));
+      //
+      // Matched on `key`, not `name`. Names are not unique — google.com:one and
+      // google.com:workspace both read "Google" — so testing names meant one
+      // failure kept its namesake on screen too, and the retry duplicated the
+      // row that had already been written.
+      const failedKeys = new Set(outcome.failed.map((f) => f.key));
+      const applied = new Set(chosen.filter((c) => !failedKeys.has(c.key)).map((c) => c.key));
       setResult((prev) =>
         prev ? { ...prev, candidates: prev.candidates.filter((c) => !applied.has(c.key)) } : prev,
       );
@@ -271,7 +304,7 @@ export default function ScanScreen() {
         const done = parts.length > 0 ? `${parts.join(' · ')}. ` : '';
         Alert.alert(
           parts.length > 0 ? 'Partly added' : 'Could not add these',
-          `${done}Could not add: ${outcome.failed.join(', ')}. They are still ticked below — tap Add again to retry.`,
+          `${done}Could not add: ${outcome.failed.map((f) => f.name).join(', ')}. They are still ticked below — tap Add again to retry.`,
           [{ text: 'Stay here', style: 'cancel' }],
         );
       } else {

@@ -200,6 +200,30 @@ export async function scanGmail(options: ScanOptions = {}): Promise<ScanResult> 
     if (signal?.cancelled) throw new ScanCancelled();
   };
 
+  /**
+   * Reports progress, then gives the scan a chance to stop.
+   *
+   * The checks below sit between the phases, which meant Cancel was only
+   * observed once a whole phase had finished. On a deep scan that is up to 800
+   * headers: the button did nothing for several seconds and then everything
+   * vanished at once, which reads as a frozen app rather than a cancelled job.
+   *
+   * These callbacks fire per completed page or message, so throwing from here
+   * stops within one request instead. The throw rejects the pool runner it came
+   * from, Promise.all rejects, and it arrives at the ScanCancelled branch below
+   * like any other cancellation.
+   *
+   * Requests already in flight are not killed — they finish and their results
+   * are dropped. Each is capped by the client's own timeout, so nothing outlives
+   * the scan for long, and abandoning a read-only GET costs nothing but the
+   * bytes. Actually aborting them would mean threading an AbortSignal through
+   * every call in client.ts, which buys a fraction of a second here.
+   */
+  const report = (p: ScanProgress): void => {
+    onProgress?.(p);
+    abortIfCancelled();
+  };
+
   /*
    * One group map across every inbox.
    *
@@ -237,14 +261,14 @@ export async function scanGmail(options: ScanOptions = {}): Promise<ScanResult> 
       // 1. search
       onProgress?.({ stage: 'searching', done: 0, total: plan.max, ...where });
       const ids = await searchMessageIds(token, buildQuery(plan.window), plan.max, (found) => {
-        onProgress?.({ stage: 'searching', done: found, total: plan.max, ...where });
+        report({ stage: 'searching', done: found, total: plan.max, ...where });
       });
       abortIfCancelled();
 
       // 2. headers
       onProgress?.({ stage: 'reading', done: 0, total: ids.length, ...where });
       const messages = await fetchHeaders(token, ids, (done) => {
-        onProgress?.({ stage: 'reading', done, total: ids.length, ...where });
+        report({ stage: 'reading', done, total: ids.length, ...where });
       });
       abortIfCancelled();
       messagesScanned += messages.length;
@@ -257,7 +281,7 @@ export async function scanGmail(options: ScanOptions = {}): Promise<ScanResult> 
       if (needBody.length) {
         onProgress?.({ stage: 'details', done: 0, total: needBody.length, ...where });
         const bodies = await fetchBodies(token, needBody, (done) => {
-          onProgress?.({ stage: 'details', done, total: needBody.length, ...where });
+          report({ stage: 'details', done, total: needBody.length, ...where });
         });
         applyBodyDetails(groups, bodies);
       }
