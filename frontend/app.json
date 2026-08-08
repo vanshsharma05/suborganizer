@@ -28,7 +28,7 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "com.suborganizer.app",
-      "versionCode": 11,
+      "versionCode": 12,
       "blockedPermissions": [
         "android.permission.SYSTEM_ALERT_WINDOW",
         "android.permission.READ_EXTERNAL_STORAGE",

@@ -330,3 +330,52 @@ $$;
 
 revoke all on function public.delete_me() from public, anon;
 grant execute on function public.delete_me() to authenticated;
+
+
+-- ------------------------------------------------------------ entitlements --
+-- What the user has actually bought, as verified by the store rather than
+-- claimed by the app.
+--
+-- `profiles.is_pro` came first and is a cache: the client used to write it after
+-- a purchase, which is exactly the hole the column grant above closes. This
+-- table is the server's own record, written only by the verify-purchase edge
+-- function running as service_role. No client policy inserts, updates or deletes
+-- here — reading your own row is all a client may do.
+--
+-- Two products, so a boolean was never going to be enough:
+--   scan_unlock  — one Gmail scan
+--   pro_lifetime — the full savings audit, forever
+
+create table if not exists public.entitlements (
+  user_id     uuid        not null references auth.users(id) on delete cascade,
+  product_id  text        not null check (product_id in ('scan_unlock', 'pro_lifetime')),
+  platform    text        not null check (platform in ('play', 'apple')),
+  /*
+   * The store's own id for this purchase — Play's orderId, Apple's
+   * originalTransactionId.
+   *
+   * Unique across the table, which is what makes the whole thing idempotent:
+   * replaying a receipt that has already been redeemed conflicts instead of
+   * granting a second time, and it cannot be redeemed by a second account
+   * either. That is the difference between verifying a purchase and merely
+   * believing one.
+   */
+  transaction_id text     not null,
+  granted_at  timestamptz not null default now(),
+  primary key (user_id, product_id)
+);
+
+create unique index if not exists entitlements_transaction_idx
+  on public.entitlements (platform, transaction_id);
+
+alter table public.entitlements enable row level security;
+
+drop policy if exists "entitlements: read own" on public.entitlements;
+
+-- Read only, and deliberately nothing else. Every write goes through the edge
+-- function, which is the only thing holding a service_role key.
+create policy "entitlements: read own"
+  on public.entitlements for select
+  using (auth.uid() = user_id);
+
+revoke insert, update, delete on public.entitlements from anon, authenticated;
