@@ -43,6 +43,43 @@ create policy "profiles: update own"
   using (auth.uid() = id)
   with check (auth.uid() = id);
 
+-- ------------------------------------------------- who may write is_pro --
+-- RLS decides which *rows* you may touch. It says nothing about which
+-- *columns*, and that gap was a free upgrade to Pro.
+--
+-- The policy above is satisfied by `auth.uid() = id`, which is true of anyone
+-- editing their own profile. The anon key ships inside the app because it is
+-- meant to, so any signed-in user could send:
+--
+--     PATCH /rest/v1/profiles?id=eq.<their own uid>   {"is_pro": true}
+--
+-- and purchases.tsx reads `pro = isProFor(owned) || Boolean(user?.is_pro)`,
+-- so the paywall opens. One request, no purchase.
+--
+-- Column privileges are the part of the permission system that does apply to
+-- columns. Name and currency are genuinely the user's to change; is_pro, id and
+-- created_at are not.
+--
+-- What this costs: the mirror in purchases.tsx that copies a store purchase back
+-- onto the profile now fails. That is already handled — the write is wrapped in
+-- .catch() and commented "purely an optimisation … a failure here costs nothing
+-- the next launch will not fix", because Play and Apple hold the durable
+-- receipt. Paying users keep Pro through the store; what they lose is being Pro
+-- on a fresh install a second or two before the store answers.
+--
+-- What this is NOT: server-side verification. Nothing here checks a receipt.
+-- The honest fix is an edge function that validates the Play/App Store token and
+-- writes is_pro with the service role, and until that exists is_pro can only be
+-- granted by hand in the dashboard. That is the right trade while nothing is on
+-- sale yet, and it must be revisited before monetisation goes live.
+-- One trap this sets for later: a column added to profiles after this runs is
+-- NOT writable by the client until it is named below. That fails closed, which
+-- is the right direction, but it fails *quietly* — the update returns success
+-- having ignored the column. Anyone adding a user-editable field to profiles has
+-- to add it here too.
+revoke update on public.profiles from anon, authenticated;
+grant  update (name, primary_currency) on public.profiles to authenticated;
+
 
 -- ----------------------------------------------------------- subscriptions --
 
@@ -137,6 +174,10 @@ create policy "subs: insert own"
 
 -- Explicit `with check` for the same reason as on profiles: it is what Postgres
 -- already infers from `using`, written down so nobody has to remember that.
+--
+-- It is not redundant here. Without it a user could take a row they own and
+-- move `user_id` to somebody else's id — pushing a subscription into a stranger's
+-- account rather than reading one out of it.
 create policy "subs: update own"
   on public.subscriptions for update
   using (auth.uid() = user_id)
