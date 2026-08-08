@@ -57,11 +57,12 @@ The `service_role` key must never appear here. Nothing else needs to be secret.
 
 ## Before you build
 
-- [x] **Hero background bundled instead of hotlinked.** `IMAGES.heroMesh` sits
-      behind both the login screen and the dashboard, and was being fetched from
-      Unsplash — so the app's first impression depended on someone else's uptime
-      and showed a blank panel offline. Now `assets/images/hero-mesh.jpg` (19 KB).
-      The unused `IMAGES.premiumBg` was dropped.
+- [x] **Hero background bundled instead of hotlinked**, then dropped entirely.
+      `IMAGES.heroMesh` was fetched from Unsplash, so the app's first impression
+      depended on someone else's uptime and went blank offline; it was bundled as
+      `assets/images/hero-mesh.jpg` to fix that. The 1.2.0 redesign replaced both
+      backgrounds with the coral gradient and removed the code, but left the file
+      shipping inside every build. Deleted 8 Aug 2026.
 - [x] **Six unused dependencies removed** — `react-native-webview`,
       `@gorhom/bottom-sheet`, `expo-haptics`, `expo-symbols`, `dayjs`,
       `react-native-dotenv`. Nothing imported them. Verified with a full native
