@@ -366,7 +366,16 @@ function Form({
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
-            await deleteSubscription(existing.id);
+            // Unguarded, a failed delete closed the alert and did nothing else:
+            // no error, no navigation, the subscription still listed. The user
+            // has just confirmed "cannot be undone" and is entitled to know
+            // whether it happened.
+            try {
+              await deleteSubscription(existing.id);
+            } catch (e) {
+              setErr(e instanceof Error ? e.message : 'Could not delete that.');
+              return;
+            }
             await refreshSubs();
             router.back();
           },
@@ -387,15 +396,29 @@ function Form({
             <IconButton
               icon={existing.status === 'active' ? 'pause' : 'play'}
               onPress={async () => {
-                await toggleSubscription(existing.id, existing.status);
+                // Same as delete: without this, pausing while offline simply
+                // did nothing and the button read as broken.
+                try {
+                  await toggleSubscription(existing.id, existing.status);
+                } catch (e) {
+                  setErr(e instanceof Error ? e.message : 'Could not change that.');
+                  return;
+                }
                 await refreshSubs();
                 router.back();
               }}
+              accessibilityLabel={existing.status === 'active' ? 'Pause this subscription' : 'Resume this subscription'}
               size={40}
               tone="brand"
               testID="form-toggle-status"
             />
-            <IconButton icon="trash-outline" onPress={confirmDelete} size={40} testID="form-delete" />
+            <IconButton
+              icon="trash-outline"
+              onPress={confirmDelete}
+              size={40}
+              accessibilityLabel="Delete this subscription"
+              testID="form-delete"
+            />
           </View>
         ) : (
           <View style={{ width: 40 }} />
